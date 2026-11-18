@@ -82,6 +82,7 @@ def public_state(state: GameState) -> dict:
         "problems": [item.model_dump() for item in state.problems],
         "pending_actions": [item.model_dump() for item in state.pending_actions],
         "last_report": state.last_report.model_dump() if state.last_report else None,
+        "last_llm_model": state.last_llm_model,
         "last_resolved": [item.model_dump() for item in state.last_resolved],
         "last_what_if": state.last_what_if.model_dump() if state.last_what_if else None,
         "advisor_log": [item.model_dump() for item in state.advisor_log[-40:]],

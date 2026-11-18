@@ -24,7 +24,7 @@ function networkError(err: unknown): Error {
   const message = err instanceof Error ? err.message : "";
   if (name === "AbortError" || /aborted|timeout/i.test(message)) {
     return new Error(
-      "A IA demorou demais para responder (mais de 3 minutos). Tente de novo ou use o modo offline."
+      "A IA demorou demais para responder (mais de 3 minutos e meio). Tente de novo ou use o modo offline."
     );
   }
   return new Error("Não foi possível falar com o servidor. Confira se o backend está no ar.");

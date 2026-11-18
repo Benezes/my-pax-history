@@ -36,6 +36,11 @@ async function startGame(page) {
   await page.getByPlaceholder(/Ex\.: Propor/).waitFor({ timeout: 30_000 });
 }
 
+async function dossieIsVisible(page) {
+  const dossie = page.getByRole("button", { name: "Dossiê" });
+  return dossie.isVisible();
+}
+
 async function shot(page, name) {
   const file = path.join(OUT, `${name}.png`);
   await page.screenshot({ path: file, fullPage: true });
@@ -50,8 +55,18 @@ async function runViewport(browser, vp) {
   await page.getByRole("button", { name: "E se?" }).click();
   await page.locator('[data-ai-job="whatif"]').waitFor({ timeout: 10_000 });
   await page.waitForTimeout(1200);
+  const pageScroll = await page.evaluate(
+    () =>
+      document.documentElement.scrollHeight > window.innerHeight + 2 ||
+      document.body.scrollHeight > window.innerHeight + 2
+  );
+  if (pageScroll) {
+    throw new Error(`page-level scrollbar at ${vp.name} during E se? loading`);
+  }
   await shot(page, `loading-whatif-${vp.name}`);
   await page.locator(".whatif").waitFor({ timeout: 120_000 });
+  await page.getByText("Respondido por simulação offline").first().waitFor({ timeout: 10_000 });
+  await shot(page, `whatif-model-${vp.name}`);
 
   await page.getByRole("button", { name: "Registrar ação" }).click();
   await page.getByRole("button", { name: "Ver texto completo" }).click();
@@ -60,11 +75,22 @@ async function runViewport(browser, vp) {
   await page.getByRole("button", { name: "Avançar 1 mês" }).click();
   await page.locator('[data-ai-job="advance"]').waitFor({ timeout: 10_000 });
   await page.waitForTimeout(1200);
+  const advanceScroll = await page.evaluate(
+    () =>
+      document.documentElement.scrollHeight > window.innerHeight + 2 ||
+      document.body.scrollHeight > window.innerHeight + 2
+  );
+  if (advanceScroll) {
+    throw new Error(`page-level scrollbar at ${vp.name} during advance loading`);
+  }
   await shot(page, `loading-advance-${vp.name}`);
   await page.locator('[data-ai-job="advance"]').waitFor({ state: "detached", timeout: 120_000 });
+  if (await dossieIsVisible(page)) await page.getByRole("button", { name: "Dossiê" }).click();
+  await page.getByRole("button", { name: "Relatório" }).click();
+  await page.getByText("Respondido por simulação offline").first().waitFor({ timeout: 10_000 });
+  await shot(page, `report-model-${vp.name}`);
 
-  const dossie = page.getByRole("button", { name: "Dossiê" });
-  if (await dossie.isVisible()) await dossie.click();
+  if (await dossieIsVisible(page)) await page.getByRole("button", { name: "Dossiê" }).click();
   await page.getByRole("button", { name: "Assessor" }).click();
   await page.getByPlaceholder("Pergunte ao assessor...").fill("Como está a inflação?");
   await page.getByRole("button", { name: "Enviar" }).click();
@@ -83,6 +109,22 @@ try {
     console.log("viewport", vp.name);
     await runViewport(browser, vp);
   }
+  const toastPage = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  await startGame(toastPage);
+  await toastPage.route("**/api/games/**/what-if", (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        detail: "O modelo gemini-3.5-flash não respondeu a tempo. Tentando outro.",
+      }),
+    })
+  );
+  await toastPage.getByPlaceholder(/Ex\.: Propor/).fill(ACTION);
+  await toastPage.getByRole("button", { name: "E se?" }).click();
+  await toastPage.locator(".toast").waitFor({ timeout: 10_000 });
+  await shot(toastPage, "error-toast-1280x800");
+  await toastPage.close();
 } finally {
   await browser.close();
 }

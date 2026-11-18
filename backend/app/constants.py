@@ -1,6 +1,20 @@
+import os
 from enum import StrEnum
 
 LLM_HTTP_TIMEOUT_SECONDS = 200.0
+GEMINI_ATTEMPT_TIMEOUT_DEFAULT = 50.0
+GEMINI_TOTAL_BUDGET_DEFAULT = 165.0
+
+
+def env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
 
 class Difficulty(StrEnum):

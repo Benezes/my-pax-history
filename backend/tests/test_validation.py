@@ -36,6 +36,20 @@ class ValidationLocaleTests(unittest.TestCase):
             response = client.post(f"/api/games/{game_id}/actions", json={"text": text})
             self.assertEqual(response.status_code, 200, response.text)
 
+    def test_what_if_reports_answered_by(self):
+        with TestClient(app) as client:
+            created = client.post(
+                "/api/games",
+                json={"difficulty": "medio", "provider": "mock", "name": "Modelo"},
+            )
+            game_id = created.json()["id"]
+            response = client.post(
+                f"/api/games/{game_id}/what-if",
+                json={"text": "Proponho uma reforma tributaria ampla"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["answered_by"], "simulação offline")
+
 
 if __name__ == "__main__":
     unittest.main()

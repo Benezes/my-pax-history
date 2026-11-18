@@ -1,24 +1,33 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from typing import Any, Callable
 
 import httpx
 
-from app.constants import LLM_HTTP_TIMEOUT_SECONDS, ProviderId
+from app.constants import (
+    GEMINI_ATTEMPT_TIMEOUT_DEFAULT,
+    GEMINI_TOTAL_BUDGET_DEFAULT,
+    ProviderId,
+    env_float,
+)
 from app.llm.base import LlmProvider, ProviderError
 from app.llm.jsonutil import JsonParseError, parse_model
 from app.llm.prompts import advisor_prompt, estimate_prompt, turn_prompt
 from app.models import AdvisorReply, GameState, TurnLlmBundle
 
+logger = logging.getLogger("presidencia.llm")
+
 GEMINI_DEFAULT = "gemini-flash-latest"
 GEMINI_STALE = frozenset({"gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"})
 GEMINI_FALLBACKS = (
     "gemini-flash-latest",
-    "gemini-3.8-flash",
-    "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
+    "gemini-3.5-flash",
     "gemini-pro-latest",
+    "gemini-3.8-flash",
 )
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 RETRY_STATUSES = {429, 503}
@@ -102,6 +111,23 @@ def _pt_http_error(status: int, body: str) -> str:
     return f"O Gemini retornou um erro (HTTP {status})."
 
 
+def _generation_config(with_thinking: bool) -> dict[str, Any]:
+    config: dict[str, Any] = {
+        "temperature": 0.4,
+        "responseMimeType": "application/json",
+    }
+    if with_thinking:
+        config["thinkingConfig"] = {
+            "thinkingBudget": 256,
+            "thinkingLevel": "LOW",
+        }
+    return config
+
+
+def _uses_thinking(model: str) -> bool:
+    return "flash" in (model or "").lower()
+
+
 class GeminiProvider(LlmProvider):
     provider_id = ProviderId.GEMINI
 
@@ -112,12 +138,25 @@ class GeminiProvider(LlmProvider):
         fallbacks: list[str] | None = None,
         client_factory: Callable[[], httpx.AsyncClient] | None = None,
         sleeper: Callable[[float], Any] | None = None,
+        attempt_timeout: float | None = None,
+        total_budget: float | None = None,
     ):
         self.api_key = (api_key or "").strip()
         self.model = resolve_gemini_model(model)
         self.fallbacks = fallbacks if fallbacks is not None else list(GEMINI_FALLBACKS)
         self._client_factory = client_factory
         self._sleeper = sleeper or asyncio.sleep
+        self.attempt_timeout = (
+            attempt_timeout
+            if attempt_timeout is not None
+            else env_float("GEMINI_ATTEMPT_TIMEOUT_SECONDS", GEMINI_ATTEMPT_TIMEOUT_DEFAULT)
+        )
+        self.total_budget = (
+            total_budget
+            if total_budget is not None
+            else env_float("GEMINI_TOTAL_BUDGET_SECONDS", GEMINI_TOTAL_BUDGET_DEFAULT)
+        )
+        self.last_model = ""
 
     async def health(self) -> dict[str, Any]:
         if not self.api_key:
@@ -136,53 +175,112 @@ class GeminiProvider(LlmProvider):
             )
         models = _candidate_models(self.model, self.fallbacks)
         last_error = "Falha ao contatar o Gemini."
+        deadline = time.monotonic() + self.total_budget
         client = (
             self._client_factory()
             if self._client_factory
-            else httpx.AsyncClient(timeout=httpx.Timeout(LLM_HTTP_TIMEOUT_SECONDS, connect=20.0))
+            else httpx.AsyncClient(timeout=httpx.Timeout(self.total_budget, connect=20.0))
         )
         try:
             for model in models:
+                remaining = deadline - time.monotonic()
+                if remaining < 4:
+                    last_error = (
+                        "Nenhum modelo Gemini respondeu a tempo. Tente de novo ou use o modo offline."
+                    )
+                    break
+                thinking = _uses_thinking(model)
                 for attempt, delay in enumerate((0.0, *BACKOFF_SECONDS)):
+                    remaining = deadline - time.monotonic()
+                    if remaining < 4:
+                        break
                     if delay:
-                        await self._sleeper(delay)
+                        await self._sleeper(min(delay, max(0.0, remaining - 3)))
                     url = f"{GEMINI_BASE}/models/{model}:generateContent"
+                    request_timeout = min(self.attempt_timeout, remaining)
+                    started = time.monotonic()
                     try:
                         response = await client.post(
                             url,
                             headers=_headers(self.api_key),
+                            timeout=request_timeout,
                             json={
                                 "contents": [{"parts": [{"text": prompt}]}],
-                                "generationConfig": {
-                                    "temperature": 0.4,
-                                    "responseMimeType": "application/json",
-                                },
+                                "generationConfig": _generation_config(thinking),
                             },
                         )
+                    except httpx.TimeoutException:
+                        elapsed = time.monotonic() - started
+                        logger.warning("gemini model=%s outcome=timeout duration=%.1fs", model, elapsed)
+                        last_error = f"O modelo {model} não respondeu a tempo. Tentando outro."
+                        break
                     except httpx.HTTPError as exc:
+                        elapsed = time.monotonic() - started
+                        logger.warning(
+                            "gemini model=%s outcome=http_error duration=%.1fs error=%s",
+                            model,
+                            elapsed,
+                            exc.__class__.__name__,
+                        )
                         last_error = f"Não foi possível alcançar o Gemini ({exc.__class__.__name__})."
                         break
+                    elapsed = time.monotonic() - started
                     if response.status_code in {401, 403}:
                         raise ProviderError(
                             "Chave da API Gemini inválida ou sem permissão. Verifique a chave em Configurações."
                         )
+                    if (
+                        response.status_code == 400
+                        and thinking
+                        and "thinking" in (response.text or "").lower()
+                    ):
+                        logger.info(
+                            "gemini model=%s outcome=thinking_rejected duration=%.1fs",
+                            model,
+                            elapsed,
+                        )
+                        thinking = False
+                        last_error = _pt_http_error(response.status_code, response.text)
+                        continue
                     if response.status_code in SKIP_STATUSES:
+                        logger.warning(
+                            "gemini model=%s outcome=skip status=%s duration=%.1fs",
+                            model,
+                            response.status_code,
+                            elapsed,
+                        )
                         last_error = _pt_http_error(response.status_code, response.text)
                         break
                     if response.status_code in RETRY_STATUSES:
                         last_error = _pt_http_error(response.status_code, response.text)
+                        logger.warning(
+                            "gemini model=%s outcome=retry status=%s duration=%.1fs",
+                            model,
+                            response.status_code,
+                            elapsed,
+                        )
                         if attempt < len(BACKOFF_SECONDS):
                             continue
                         break
                     if response.status_code >= 400:
                         last_error = _pt_http_error(response.status_code, response.text)
+                        logger.warning(
+                            "gemini model=%s outcome=error status=%s duration=%.1fs",
+                            model,
+                            response.status_code,
+                            elapsed,
+                        )
                         break
                     payload = response.json()
                     try:
-                        return payload["candidates"][0]["content"]["parts"][0]["text"]
+                        text = payload["candidates"][0]["content"]["parts"][0]["text"]
                     except (KeyError, IndexError, TypeError):
                         last_error = "Resposta vazia do Gemini."
+                        logger.warning("gemini model=%s outcome=empty duration=%.1fs", model, elapsed)
                         break
+                    self.last_model = model
+                    logger.info("gemini model=%s outcome=ok duration=%.1fs", model, elapsed)
+                    return text
         finally:
             await client.aclose()
         raise ProviderError(last_error)

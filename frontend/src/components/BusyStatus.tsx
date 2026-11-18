@@ -1,7 +1,9 @@
 export type AiKind = "whatif" | "advance" | "advisor";
 
+export const AI_WAIT_HINT = "a IA pode levar até 3 minutos e meio";
+
 const ADVANCE_STEPS = [
-  "Simulando o mês… a IA pode levar até 2 minutos.",
+  `Simulando o mês… ${AI_WAIT_HINT}.`,
   "Interpretando a ação e o Congresso…",
   "Ouvindo reações dos agentes…",
   "Atualizando indicadores e o mundo…",
@@ -19,13 +21,13 @@ export function jobCopy(kind: AiKind, months: number, stepIndex: number) {
   if (kind === "whatif") {
     return {
       title: "E se?",
-      body: "Simulando a ação… a IA pode levar até 2 minutos.",
+      body: `Simulando a ação… ${AI_WAIT_HINT}.`,
     };
   }
   if (kind === "advisor") {
     return {
       title: "Assessor",
-      body: "Consultando o assessor… a IA pode levar até 2 minutos.",
+      body: `Consultando o assessor… ${AI_WAIT_HINT}.`,
     };
   }
   const prefix = months > 1 ? `Simulando ${months} meses. ` : "";

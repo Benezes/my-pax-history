@@ -34,6 +34,12 @@ def _get(game_id: str):
     return state
 
 
+def _stamp_model(state, provider) -> str:
+    name = getattr(provider, "last_model", "") or ""
+    state.last_llm_model = name
+    return name
+
+
 def _provider(state, api_key: str | None = None):
     settings = merged_settings(api_key)
     if state.provider == "gemini" and state.provider_model:
@@ -46,15 +52,23 @@ def _provider(state, api_key: str | None = None):
 async def _safe_turn(state, texts: list[str]) -> TurnLlmBundle:
     provider = _provider(state)
     try:
-        return await provider.interpret_turn(state, texts)
+        bundle = await provider.interpret_turn(state, texts)
+        _stamp_model(state, provider)
+        return bundle
     except ProviderError as exc:
         if state.provider != "mock" and "JSON" in exc.message_pt:
-            return await MockProvider().interpret_turn(state, texts)
+            mock = MockProvider()
+            bundle = await mock.interpret_turn(state, texts)
+            _stamp_model(state, mock)
+            return bundle
         raise
     except Exception as exc:
         if state.provider == "mock":
             raise ProviderError("Falha no provedor offline.") from exc
-        return await MockProvider().interpret_turn(state, texts)
+        mock = MockProvider()
+        bundle = await mock.interpret_turn(state, texts)
+        _stamp_model(state, mock)
+        return bundle
 
 
 @router.post("/games")
@@ -128,10 +142,13 @@ async def what_if(game_id: str, body: WhatIfRequest):
         provider = _provider(state)
         try:
             bundle = await provider.estimate_action(state, body.text)
+            answered_by = getattr(provider, "last_model", "") or ""
         except ProviderError:
             raise
         except Exception:
-            bundle = await MockProvider().estimate_action(state, body.text)
+            mock = MockProvider()
+            bundle = await mock.estimate_action(state, body.text)
+            answered_by = getattr(mock, "last_model", "") or ""
         proposal: ActionProposal
         if bundle.interpretation.actions:
             proposal = bundle.interpretation.actions[0]
@@ -144,6 +161,7 @@ async def what_if(game_id: str, body: WhatIfRequest):
                 "Estimativa do assessor com base no estado atual. Nada foi alterado na partida."
             )
         result = build_what_if(state, proposal, body.text, commentary, disagrees, bundle.reactions)
+        result.answered_by = answered_by
         after = state.model_dump_json()
         if after != before:
             raise HTTPException(status_code=500, detail="A simulação 'E se?' tentou alterar o estado e foi abortada.")
@@ -159,10 +177,13 @@ async def advisor(game_id: str, body: AdvisorRequest):
         provider = _provider(state)
         try:
             reply = await provider.advise(state, body.message)
+            answered_by = _stamp_model(state, provider)
         except ProviderError:
             raise
         except Exception:
-            reply = await MockProvider().advise(state, body.message)
+            mock = MockProvider()
+            reply = await mock.advise(state, body.message)
+            answered_by = _stamp_model(state, mock)
         state.advisor_log.append(
             ChatMessage(role="user", content=body.message, at_month_index=state.date.month_index())
         )
@@ -172,6 +193,7 @@ async def advisor(game_id: str, body: AdvisorRequest):
                 content=reply.reply,
                 disagrees=reply.disagrees,
                 at_month_index=state.date.month_index(),
+                answered_by=answered_by,
             )
         )
         state.advisor_log = state.advisor_log[-40:]

@@ -73,6 +73,7 @@ export interface ChatMessage {
   role: "user" | "advisor";
   content: string;
   disagrees: boolean;
+  answered_by?: string;
 }
 
 export interface ResolvedAction {
@@ -124,6 +125,7 @@ export interface WhatIfResult {
   advisor_commentary: string;
   disagrees: boolean;
   countries: string[];
+  answered_by?: string;
 }
 
 export interface Game {
@@ -156,6 +158,7 @@ export interface Game {
   pending_actions: Array<{ id: string; text: string }>;
   last_report: Report | null;
   last_report_date_label?: string | null;
+  last_llm_model?: string | null;
   last_resolved: ResolvedAction[];
   advisor_log: ChatMessage[];
   history: HistoryEntry[];
