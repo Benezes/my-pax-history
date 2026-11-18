@@ -1,5 +1,7 @@
 import type { Game, MetaResponse, SaveRow, WhatIfResult } from "./types";
 
+export const FETCH_TIMEOUT_MS = 210_000;
+
 function localizeRaw(message: string) {
   const lower = message.toLowerCase();
   if (lower.includes("at most") && lower.includes("12000")) {
@@ -15,6 +17,17 @@ function localizeRaw(message: string) {
     return "Há um problema no texto enviado. Revise e tente de novo.";
   }
   return message;
+}
+
+function networkError(err: unknown): Error {
+  const name = err instanceof Error ? err.name : "";
+  const message = err instanceof Error ? err.message : "";
+  if (name === "AbortError" || /aborted|timeout/i.test(message)) {
+    return new Error(
+      "A IA demorou demais para responder (mais de 3 minutos). Tente de novo ou use o modo offline."
+    );
+  }
+  return new Error("Não foi possível falar com o servidor. Confira se o backend está no ar.");
 }
 
 async function parseError(response: Response): Promise<string> {
@@ -34,17 +47,33 @@ async function parseError(response: Response): Promise<string> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-  });
-  if (!response.ok) {
-    throw new Error(await parseError(response));
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(path, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers || {}),
+      },
+    });
+    if (!response.ok) {
+      throw new Error(await parseError(response));
+    }
+    return response.json() as Promise<T>;
+  } catch (err) {
+    if (
+      (err instanceof DOMException && err.name === "AbortError") ||
+      (err instanceof Error && err.name === "AbortError") ||
+      err instanceof TypeError
+    ) {
+      throw networkError(err);
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
   }
-  return response.json() as Promise<T>;
 }
 
 export const api = {

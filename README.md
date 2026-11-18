@@ -73,6 +73,10 @@ Arquitetura plugável (`backend/app/llm/`). V1: `mock`, `gemini`, `ollama`. Para
 
 Não chama rede. Serve para aprender o jogo e para desenvolvimento.
 
+Para ver os estados de espera da IA sem Gemini, defina `MOCK_LLM_DELAY_SECONDS` (por exemplo `8`) ao subir o backend. O padrão é `0`, então os testes continuam rápidos.
+
+Chamadas reais de Gemini/Ollama podem levar cerca de 2 minutos. O cliente HTTP do backend, o proxy do Vite e o `fetch` do navegador esperam até ~3,5 minutos e mostram um spinner com tempo decorrido (e etapas rotativas ao avançar o mês). Se estourar, a interface explica o atraso em português.
+
 ### Gemini
 
 1. Crie uma chave em Google AI Studio.
