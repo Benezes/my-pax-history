@@ -31,6 +31,23 @@ function writeGeminiKey(value: string) {
   }
 }
 
+function ModelNote({ name }: { name?: string | null }) {
+  if (!name) return null;
+  return <p className="llm-note">Respondido por {name}</p>;
+}
+
+function Toast({ message, onClose }: { message: string; onClose: () => void }) {
+  if (!message) return null;
+  return (
+    <div className="toast" role="alert">
+      <p>{message}</p>
+      <button type="button" className="linkish" onClick={onClose} aria-label="Fechar aviso">
+        Fechar
+      </button>
+    </div>
+  );
+}
+
 function formatIndicator(id: string, value: number) {
   if (id === "public_debt_gdp") return `${NUM(value)}% PIB`;
   if (id === "crime_index") return NUM(value, 0);
@@ -546,7 +563,7 @@ function GameScreen({
           </button>
         </div>
       </header>
-      {error && <div className="banner inset">{error}</div>}
+      <Toast message={error} onClose={() => setError("")} />
       {compact && (
         <nav className="mobile-nav">
           <button className={pane === "stats" ? "on" : ""} onClick={() => setPane("stats")}>
@@ -636,6 +653,7 @@ function GameScreen({
               {game.last_report ? (
                 <>
                   <div className="kicker">Relatório — {game.last_report_date_label || game.date_label}</div>
+                  <ModelNote name={game.last_llm_model} />
                   <article>
                     <h4>Economia</h4>
                     <p>{game.last_report.economia}</p>
@@ -697,6 +715,9 @@ function GameScreen({
                     className={`bubble ${item.role === "user" ? "user" : ""} ${item.disagrees ? "disagree" : ""}`}
                   >
                     {item.content}
+                    {item.role === "advisor" && item.answered_by ? (
+                      <ModelNote name={item.answered_by} />
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -918,6 +939,7 @@ function WhatIfPanel({
   return (
     <div className="whatif">
       <div className="kicker">E se?</div>
+      <ModelNote name={result.answered_by} />
       <h3>{result.title}</h3>
       <p>{result.summary}</p>
       <span className={`tag ${result.execution}`}>

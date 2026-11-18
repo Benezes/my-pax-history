@@ -309,6 +309,7 @@ class ChatMessage(BaseModel):
     content: str
     disagrees: bool = False
     at_month_index: int = 0
+    answered_by: str = ""
 
 
 class PendingAction(BaseModel):
@@ -375,6 +376,7 @@ class WhatIfResult(BaseModel):
     advisor_commentary: str = ""
     disagrees: bool = False
     countries: list[str] = Field(default_factory=list)
+    answered_by: str = ""
 
 
 class GameState(BaseModel):
@@ -407,6 +409,7 @@ class GameState(BaseModel):
     history: list[HistoryEntry] = Field(default_factory=list)
     pending_actions: list[PendingAction] = Field(default_factory=list)
     last_report: ReportSection | None = None
+    last_llm_model: str = ""
     last_resolved: list[ResolvedAction] = Field(default_factory=list)
     last_what_if: WhatIfResult | None = None
     advisor_log: list[ChatMessage] = Field(default_factory=list)

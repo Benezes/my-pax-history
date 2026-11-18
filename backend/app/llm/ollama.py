@@ -70,6 +70,7 @@ class OllamaProvider(LlmProvider):
         content = (payload.get("message") or {}).get("content") or payload.get("response") or ""
         if not content:
             raise ProviderError("Ollama devolveu resposta vazia.")
+        self.last_model = self.model
         return content
 
     async def _bundle(self, prompt: str) -> TurnLlmBundle:

@@ -75,7 +75,7 @@ Não chama rede. Serve para aprender o jogo e para desenvolvimento.
 
 Para ver os estados de espera da IA sem Gemini, defina `MOCK_LLM_DELAY_SECONDS` (por exemplo `8`) ao subir o backend. O padrão é `0`, então os testes continuam rápidos.
 
-Chamadas reais de Gemini/Ollama podem levar cerca de 2 minutos. O cliente HTTP do backend, o proxy do Vite e o `fetch` do navegador esperam até ~3,5 minutos e mostram um spinner com tempo decorrido (e etapas rotativas ao avançar o mês). Se estourar, a interface explica o atraso em português.
+Chamadas reais de Gemini/Ollama podem levar alguns minutos. O `fetch` do navegador e o proxy do Vite esperam até **3 minutos e meio**. Cada modelo Gemini tem um teto curto (`GEMINI_ATTEMPT_TIMEOUT_SECONDS`, padrão 50s); se travar, o jogo abandona e tenta o próximo da lista. O orçamento total da cadeia (`GEMINI_TOTAL_BUDGET_SECONDS`, padrão 165s) fica abaixo do timeout da interface. A UI mostra um spinner com tempo decorrido e, no relatório, qual modelo respondeu.
 
 ### Gemini
 
@@ -87,7 +87,7 @@ GEMINI_API_KEY=sua_chave
 GEMINI_MODEL=gemini-flash-latest
 ```
 
-O padrão é o alias `gemini-flash-latest` (não um número de versão que some). Em **Configurações**, com a chave preenchida, a lista de modelos vem da API ListModels. Se um modelo responder 404/429/503, o jogo tenta de novo e cai para a lista de reserva.
+O padrão é o alias `gemini-flash-latest` (não um número de versão que some). Em **Configurações**, com a chave preenchida, a lista de modelos vem da API ListModels. Se um modelo responder 404/429/503, ou estourar o tempo da tentativa, o jogo cai para a lista de reserva: `gemini-3.1-flash-lite`, `gemini-3.5-flash`, `gemini-pro-latest`, e por último `gemini-3.8-flash`. Modelos flash pedem um orçamento baixo de “thinking”; se o modelo recusar o campo (HTTP 400), a chamada é refeita sem ele.
 
 Ou cole a chave na tela de nova partida / Configurações. Ela fica só no SQLite local (`backend/data/`), nunca no repositório.
 

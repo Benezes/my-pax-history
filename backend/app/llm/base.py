@@ -15,6 +15,7 @@ class ProviderError(RuntimeError):
 
 class LlmProvider(ABC):
     provider_id: ProviderId
+    last_model: str = ""
 
     @abstractmethod
     async def interpret_turn(self, state: GameState, pending_texts: list[str]) -> TurnLlmBundle:

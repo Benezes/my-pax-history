@@ -538,6 +538,7 @@ async def mock_llm_delay() -> None:
 
 class MockProvider(LlmProvider):
     provider_id = ProviderId.MOCK
+    last_model = "simulação offline"
 
     def _bundle(self, state: GameState, texts: list[str], with_events: bool) -> TurnLlmBundle:
         actions: list[ActionProposal] = []
@@ -571,14 +572,17 @@ class MockProvider(LlmProvider):
 
     async def interpret_turn(self, state: GameState, pending_texts: list[str]) -> TurnLlmBundle:
         await mock_llm_delay()
+        self.last_model = "simulação offline"
         return self._bundle(state, pending_texts, with_events=True)
 
     async def estimate_action(self, state: GameState, text: str) -> TurnLlmBundle:
         await mock_llm_delay()
+        self.last_model = "simulação offline"
         return self._bundle(state, [text], with_events=False)
 
     async def advise(self, state: GameState, message: str) -> AdvisorReply:
         await mock_llm_delay()
+        self.last_model = "simulação offline"
         lowered = message.lower()
         disagrees = any(token in lowered for token in RISKY)
         if disagrees:
