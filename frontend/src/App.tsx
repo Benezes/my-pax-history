@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
+import BusyStatus, { type AiKind } from "./components/BusyStatus";
 import GlobeView from "./components/GlobeView";
+import PendingAction from "./components/PendingAction";
 import { ACTION_MAX, ACTION_MIN, ADVISOR_MAX } from "./limits";
 import type { Game, MetaResponse, SaveRow, View, WhatIfResult } from "./types";
 
@@ -343,7 +345,11 @@ function GameScreen({
   const [whatIf, setWhatIf] = useState<WhatIfResult | null>(null);
   const [advice, setAdvice] = useState("");
   const [saveName, setSaveName] = useState("Arquivo 1");
+  const [aiJob, setAiJob] = useState<{ kind: AiKind; months: number } | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [stepIndex, setStepIndex] = useState(0);
   const over = game.status !== "playing";
+  const aiBusy = Boolean(aiJob);
 
   useEffect(() => {
     const apply = () => {
@@ -366,6 +372,23 @@ function GameScreen({
     [game]
   );
 
+  useEffect(() => {
+    if (!aiJob) {
+      setElapsed(0);
+      setStepIndex(0);
+      return;
+    }
+    const tick = window.setInterval(() => setElapsed((value) => value + 1), 1000);
+    const rotate =
+      aiJob.kind === "advance"
+        ? window.setInterval(() => setStepIndex((value) => value + 1), 12000)
+        : 0;
+    return () => {
+      window.clearInterval(tick);
+      if (rotate) window.clearInterval(rotate);
+    };
+  }, [aiJob]);
+
   async function run<T>(fn: () => Promise<T>) {
     setBusy(true);
     setError("");
@@ -376,6 +399,21 @@ function GameScreen({
       return null;
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runAi<T>(kind: AiKind, months: number, fn: () => Promise<T>) {
+    setAiJob({ kind, months });
+    setElapsed(0);
+    setStepIndex(0);
+    setError("");
+    try {
+      return await fn();
+    } catch (err) {
+      setError((err as Error).message);
+      return null;
+    } finally {
+      setAiJob(null);
     }
   }
 
@@ -406,12 +444,12 @@ function GameScreen({
   async function askWhatIf() {
     const text = validateActionText();
     if (!text) return;
-    const result = await run(() => api.whatIf(game.id, text));
+    const result = await runAi("whatif", 1, () => api.whatIf(game.id, text));
     if (result) setWhatIf(result);
   }
 
   async function advance(months = 1) {
-    const next = await run(() => api.advance(game.id, months));
+    const next = await runAi("advance", months, () => api.advance(game.id, months));
     if (next) {
       setGame(next);
       setTab("report");
@@ -425,7 +463,7 @@ function GameScreen({
       setError(`A pergunta pode ter no máximo ${ADVISOR_MAX.toLocaleString("pt-BR")} caracteres.`);
       return;
     }
-    const next = await run(() => api.advisor(game.id, advice.trim()));
+    const next = await runAi("advisor", 1, () => api.advisor(game.id, advice.trim()));
     if (next) {
       setGame(next);
       setAdvice("");
@@ -497,7 +535,7 @@ function GameScreen({
             onChange={(e) => setSaveName(e.target.value)}
             aria-label="Nome do arquivo"
           />
-          <button className="btn" onClick={save} disabled={busy}>
+          <button className="btn" onClick={save} disabled={busy || aiBusy}>
             Salvar
           </button>
           <button className="btn" onClick={onSettings} disabled={busy}>
@@ -662,6 +700,9 @@ function GameScreen({
                   </div>
                 ))}
               </div>
+              {aiJob?.kind === "advisor" && (
+                <BusyStatus kind="advisor" months={1} elapsed={elapsed} stepIndex={stepIndex} />
+              )}
               <form onSubmit={talk} className="field">
                 <input
                   value={advice}
@@ -669,7 +710,7 @@ function GameScreen({
                   maxLength={ADVISOR_MAX}
                   placeholder="Pergunte ao assessor..."
                 />
-                <button className="btn" disabled={busy}>
+                <button className="btn" disabled={busy || aiBusy}>
                   Enviar
                 </button>
               </form>
@@ -693,23 +734,24 @@ function GameScreen({
         {game.pending_actions.length > 0 && (
           <div className="pending">
             {game.pending_actions.map((item) => (
-              <span className="chip" key={item.id}>
-                {item.text.slice(0, 80)}
-              </span>
+              <PendingAction key={item.id} text={item.text} />
             ))}
           </div>
         )}
+        {aiJob && (aiJob.kind !== "advisor" || tab !== "advisor") && (
+          <BusyStatus kind={aiJob.kind} months={aiJob.months} elapsed={elapsed} stepIndex={stepIndex} />
+        )}
         <div className="row dock-actions">
-          <button className="btn" disabled={busy || tooShort || overLimit} onClick={askWhatIf}>
+          <button className="btn" disabled={busy || aiBusy || tooShort || overLimit} onClick={askWhatIf}>
             E se?
           </button>
-          <button className="btn primary" disabled={busy || tooShort || overLimit} onClick={confirmAction}>
+          <button className="btn primary" disabled={busy || aiBusy || tooShort || overLimit} onClick={confirmAction}>
             Registrar ação
           </button>
-          <button className="btn" disabled={busy} onClick={() => advance(1)}>
+          <button className="btn" disabled={busy || aiBusy} onClick={() => advance(1)}>
             Avançar 1 mês
           </button>
-          <button className="btn" disabled={busy} onClick={() => advance(3)}>
+          <button className="btn" disabled={busy || aiBusy} onClick={() => advance(3)}>
             Avançar 3 meses
           </button>
         </div>

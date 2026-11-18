@@ -4,7 +4,7 @@ from typing import Any
 
 import httpx
 
-from app.constants import ProviderId
+from app.constants import LLM_HTTP_TIMEOUT_SECONDS, ProviderId
 from app.llm.base import LlmProvider, ProviderError
 from app.llm.jsonutil import JsonParseError, parse_model
 from app.llm.prompts import advisor_prompt, estimate_prompt, turn_prompt
@@ -47,7 +47,7 @@ class OllamaProvider(LlmProvider):
 
     async def _complete(self, prompt: str) -> str:
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(LLM_HTTP_TIMEOUT_SECONDS, connect=20.0)) as client:
                 response = await client.post(
                     f"{self.base_url}/api/chat",
                     json={

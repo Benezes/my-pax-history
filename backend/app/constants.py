@@ -1,5 +1,7 @@
 from enum import StrEnum
 
+LLM_HTTP_TIMEOUT_SECONDS = 200.0
+
 
 class Difficulty(StrEnum):
     MEDIO = "medio"

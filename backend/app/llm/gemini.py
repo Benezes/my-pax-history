@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 import httpx
 
-from app.constants import ProviderId
+from app.constants import LLM_HTTP_TIMEOUT_SECONDS, ProviderId
 from app.llm.base import LlmProvider, ProviderError
 from app.llm.jsonutil import JsonParseError, parse_model
 from app.llm.prompts import advisor_prompt, estimate_prompt, turn_prompt
@@ -136,7 +136,11 @@ class GeminiProvider(LlmProvider):
             )
         models = _candidate_models(self.model, self.fallbacks)
         last_error = "Falha ao contatar o Gemini."
-        client = self._client_factory() if self._client_factory else httpx.AsyncClient(timeout=45.0)
+        client = (
+            self._client_factory()
+            if self._client_factory
+            else httpx.AsyncClient(timeout=httpx.Timeout(LLM_HTTP_TIMEOUT_SECONDS, connect=20.0))
+        )
         try:
             for model in models:
                 for attempt, delay in enumerate((0.0, *BACKOFF_SECONDS)):

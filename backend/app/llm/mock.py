@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import os
 from dataclasses import dataclass
 
 from app.constants import ProviderId
@@ -524,6 +526,16 @@ def _report(state: GameState, proposal: ActionProposal | None) -> ReportSection:
     )
 
 
+async def mock_llm_delay() -> None:
+    raw = os.getenv("MOCK_LLM_DELAY_SECONDS") or "0"
+    try:
+        delay = float(raw)
+    except ValueError:
+        delay = 0.0
+    if delay > 0:
+        await asyncio.sleep(delay)
+
+
 class MockProvider(LlmProvider):
     provider_id = ProviderId.MOCK
 
@@ -558,12 +570,15 @@ class MockProvider(LlmProvider):
         )
 
     async def interpret_turn(self, state: GameState, pending_texts: list[str]) -> TurnLlmBundle:
+        await mock_llm_delay()
         return self._bundle(state, pending_texts, with_events=True)
 
     async def estimate_action(self, state: GameState, text: str) -> TurnLlmBundle:
+        await mock_llm_delay()
         return self._bundle(state, [text], with_events=False)
 
     async def advise(self, state: GameState, message: str) -> AdvisorReply:
+        await mock_llm_delay()
         lowered = message.lower()
         disagrees = any(token in lowered for token in RISKY)
         if disagrees:
