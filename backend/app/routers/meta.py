@@ -5,7 +5,9 @@ from fastapi import APIRouter, HTTPException
 from app.config_loader import ConfigError, parse_brazil, parse_world
 from app.constants import DIFFICULTY_LABELS, PROVIDER_LABELS, Difficulty, ProviderId
 from app.llm.registry import provider_status
-from app.models import SettingsUpdate
+from app.llm.base import ProviderError
+from app.llm.gemini import list_gemini_models
+from app.models import GeminiModelsRequest, SettingsUpdate
 from app.settings_load import env_gemini_key, merged_settings
 from app.store import put_setting, settings_public
 
@@ -62,6 +64,7 @@ async def update_settings(body: SettingsUpdate):
     mapping = {
         "gemini_api_key": body.gemini_api_key,
         "gemini_model": body.gemini_model,
+        "gemini_fallback_models": body.gemini_fallback_models,
         "ollama_base_url": body.ollama_base_url,
         "ollama_model": body.ollama_model,
         "default_provider": body.default_provider,
@@ -73,3 +76,14 @@ async def update_settings(body: SettingsUpdate):
             put_setting(key, value.strip())
     settings = merged_settings()
     return settings_public(settings, bool(env_gemini_key()))
+
+
+@router.post("/gemini/models")
+async def gemini_models(body: GeminiModelsRequest):
+    settings = merged_settings(body.api_key)
+    key = (body.api_key or settings.get("gemini_api_key") or "").strip()
+    try:
+        models = await list_gemini_models(key)
+    except ProviderError as exc:
+        raise HTTPException(status_code=400, detail=exc.message_pt) from exc
+    return {"models": models}

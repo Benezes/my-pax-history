@@ -1,10 +1,32 @@
 import type { Game, MetaResponse, SaveRow, WhatIfResult } from "./types";
 
+function localizeRaw(message: string) {
+  const lower = message.toLowerCase();
+  if (lower.includes("at most") && lower.includes("12000")) {
+    return "O texto da ação pode ter no máximo 12000 caracteres.";
+  }
+  if (lower.includes("at most") && lower.includes("4000")) {
+    return "O texto é longo demais. Reduza um pouco e tente de novo.";
+  }
+  if (lower.includes("at least")) {
+    return "Escreva um pouco mais para o assessor entender a ação.";
+  }
+  if (lower.startsWith("string should")) {
+    return "Há um problema no texto enviado. Revise e tente de novo.";
+  }
+  return message;
+}
+
 async function parseError(response: Response): Promise<string> {
   try {
     const data = await response.json();
-    if (typeof data.detail === "string") return data.detail;
-    if (Array.isArray(data.detail)) return data.detail.map((item: { msg?: string }) => item.msg).join(" ");
+    if (typeof data.detail === "string") return localizeRaw(data.detail);
+    if (Array.isArray(data.detail)) {
+      return data.detail
+        .map((item: { msg?: string }) => localizeRaw(item.msg || ""))
+        .filter(Boolean)
+        .join(" ");
+    }
     return "Falha na comunicação com o servidor.";
   } catch {
     return "Falha na comunicação com o servidor.";
@@ -50,4 +72,9 @@ export const api = {
   load: (id: string) => request<Game>(`/api/games/${id}/load`, { method: "POST" }),
   saveSettings: (body: Record<string, string>) =>
     request<MetaResponse["settings"]>("/api/settings", { method: "POST", body: JSON.stringify(body) }),
+  listGeminiModels: (apiKey?: string) =>
+    request<{ models: string[] }>("/api/gemini/models", {
+      method: "POST",
+      body: JSON.stringify({ api_key: apiKey || undefined }),
+    }),
 };

@@ -18,6 +18,7 @@ export interface MetaResponse {
   settings: {
     gemini_api_key_set: boolean;
     gemini_model: string;
+    gemini_fallback_models?: string;
     ollama_base_url: string;
     ollama_model: string;
     default_provider: string;

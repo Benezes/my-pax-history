@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import GlobeView from "./components/GlobeView";
+import { ACTION_MAX, ACTION_MIN, ADVISOR_MAX } from "./limits";
 import type { Game, MetaResponse, SaveRow, View, WhatIfResult } from "./types";
 
 const GEMINI_KEY_STORAGE = "presidencia.geminiApiKey";
@@ -336,11 +337,22 @@ function GameScreen({
   onExit: () => void;
 }) {
   const [tab, setTab] = useState<"report" | "history" | "advisor">("report");
+  const [pane, setPane] = useState<"map" | "stats" | "intel">("map");
+  const [compact, setCompact] = useState(false);
   const [draft, setDraft] = useState("");
   const [whatIf, setWhatIf] = useState<WhatIfResult | null>(null);
   const [advice, setAdvice] = useState("");
   const [saveName, setSaveName] = useState("Arquivo 1");
   const over = game.status !== "playing";
+
+  useEffect(() => {
+    const apply = () => {
+      setCompact(window.innerWidth < 1200 || window.innerHeight < 760);
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
+  }, []);
 
   const fiscalPct = Math.min(
     100,
@@ -367,9 +379,23 @@ function GameScreen({
     }
   }
 
+  function validateActionText() {
+    const trimmed = draft.trim();
+    if (trimmed.length < ACTION_MIN) {
+      setError("Escreva pelo menos 3 caracteres para o assessor entender a ação.");
+      return null;
+    }
+    if (draft.length > ACTION_MAX) {
+      setError(`O texto da ação pode ter no máximo ${ACTION_MAX.toLocaleString("pt-BR")} caracteres.`);
+      return null;
+    }
+    return trimmed;
+  }
+
   async function confirmAction() {
-    if (draft.trim().length < 3) return;
-    const next = await run(() => api.queueAction(game.id, draft.trim()));
+    const text = validateActionText();
+    if (!text) return;
+    const next = await run(() => api.queueAction(game.id, text));
     if (next) {
       setGame(next);
       setDraft("");
@@ -378,8 +404,9 @@ function GameScreen({
   }
 
   async function askWhatIf() {
-    if (draft.trim().length < 3) return;
-    const result = await run(() => api.whatIf(game.id, draft.trim()));
+    const text = validateActionText();
+    if (!text) return;
+    const result = await run(() => api.whatIf(game.id, text));
     if (result) setWhatIf(result);
   }
 
@@ -394,6 +421,10 @@ function GameScreen({
   async function talk(event: FormEvent) {
     event.preventDefault();
     if (advice.trim().length < 2) return;
+    if (advice.length > ADVISOR_MAX) {
+      setError(`A pergunta pode ter no máximo ${ADVISOR_MAX.toLocaleString("pt-BR")} caracteres.`);
+      return;
+    }
     const next = await run(() => api.advisor(game.id, advice.trim()));
     if (next) {
       setGame(next);
@@ -427,8 +458,11 @@ function GameScreen({
     );
   }
 
+  const overLimit = draft.length > ACTION_MAX;
+  const tooShort = draft.trim().length < ACTION_MIN;
+
   return (
-    <div className="screen">
+    <div className={`game ${compact ? "is-compact" : ""}`}>
       <header className="topbar">
         <div className="brand">
           <strong>Presidência da República</strong>
@@ -456,8 +490,13 @@ function GameScreen({
             </div>
           </div>
         </div>
-        <div className="row">
-          <input value={saveName} onChange={(e) => setSaveName(e.target.value)} style={{ width: 140 }} />
+        <div className="row top-actions">
+          <input
+            className="save-name"
+            value={saveName}
+            onChange={(e) => setSaveName(e.target.value)}
+            aria-label="Nome do arquivo"
+          />
           <button className="btn" onClick={save} disabled={busy}>
             Salvar
           </button>
@@ -469,9 +508,22 @@ function GameScreen({
           </button>
         </div>
       </header>
-      {error && <div className="banner">{error}</div>}
-      <div className="layout">
-        <aside className="panel">
+      {error && <div className="banner inset">{error}</div>}
+      {compact && (
+        <nav className="mobile-nav">
+          <button className={pane === "stats" ? "on" : ""} onClick={() => setPane("stats")}>
+            Indicadores
+          </button>
+          <button className={pane === "map" ? "on" : ""} onClick={() => setPane("map")}>
+            Mapa
+          </button>
+          <button className={pane === "intel" ? "on" : ""} onClick={() => setPane("intel")}>
+            Dossiê
+          </button>
+        </nav>
+      )}
+      <div className="layout" data-pane={compact ? pane : "full"}>
+        <aside className="panel stats">
           <div className="kicker">Indicadores</div>
           {keyIndicators.map(
             (item) =>
@@ -511,42 +563,10 @@ function GameScreen({
             </div>
           ))}
         </aside>
-        <section>
+        <section className="map-col">
           <GlobeView countries={game.map_countries} />
-          <div className="dock">
-            <div className="kicker">Campo de ações</div>
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="Ex.: Propor uma reforma tributária gradual e negociar a base do centrão com emendas de infraestrutura no Nordeste."
-            />
-            {game.pending_actions.length > 0 && (
-              <div className="pending">
-                {game.pending_actions.map((item) => (
-                  <span className="chip" key={item.id}>
-                    {item.text.slice(0, 80)}
-                  </span>
-                ))}
-              </div>
-            )}
-            <div className="row" style={{ justifyContent: "flex-start", marginTop: 8 }}>
-              <button className="btn" disabled={busy || draft.trim().length < 3} onClick={askWhatIf}>
-                E se?
-              </button>
-              <button className="btn primary" disabled={busy || draft.trim().length < 3} onClick={confirmAction}>
-                Registrar ação
-              </button>
-              <button className="btn" disabled={busy} onClick={() => advance(1)}>
-                Avançar 1 mês
-              </button>
-              <button className="btn" disabled={busy} onClick={() => advance(3)}>
-                Avançar 3 meses
-              </button>
-            </div>
-            {whatIf && <WhatIfPanel result={whatIf} onConfirm={confirmAction} onClose={() => setWhatIf(null)} />}
-          </div>
         </section>
-        <aside className="panel right">
+        <aside className="panel intel">
           <div className="tabs">
             <button className={`tab ${tab === "report" ? "on" : ""}`} onClick={() => setTab("report")}>
               Relatório
@@ -646,6 +666,7 @@ function GameScreen({
                 <input
                   value={advice}
                   onChange={(e) => setAdvice(e.target.value)}
+                  maxLength={ADVISOR_MAX}
                   placeholder="Pergunte ao assessor..."
                 />
                 <button className="btn" disabled={busy}>
@@ -655,6 +676,44 @@ function GameScreen({
             </>
           )}
         </aside>
+      </div>
+      <div className="dock">
+        <div className="dock-head">
+          <div className="kicker">Campo de ações</div>
+          <span className={`counter ${overLimit ? "over" : ""}`}>
+            {draft.length.toLocaleString("pt-BR")} / {ACTION_MAX.toLocaleString("pt-BR")}
+          </span>
+        </div>
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          maxLength={ACTION_MAX + 200}
+          placeholder="Ex.: Propor uma reforma tributária gradual e negociar a base do centrão com emendas de infraestrutura no Nordeste."
+        />
+        {game.pending_actions.length > 0 && (
+          <div className="pending">
+            {game.pending_actions.map((item) => (
+              <span className="chip" key={item.id}>
+                {item.text.slice(0, 80)}
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="row dock-actions">
+          <button className="btn" disabled={busy || tooShort || overLimit} onClick={askWhatIf}>
+            E se?
+          </button>
+          <button className="btn primary" disabled={busy || tooShort || overLimit} onClick={confirmAction}>
+            Registrar ação
+          </button>
+          <button className="btn" disabled={busy} onClick={() => advance(1)}>
+            Avançar 1 mês
+          </button>
+          <button className="btn" disabled={busy} onClick={() => advance(3)}>
+            Avançar 3 meses
+          </button>
+        </div>
+        {whatIf && <WhatIfPanel result={whatIf} onConfirm={confirmAction} onClose={() => setWhatIf(null)} />}
       </div>
     </div>
   );
@@ -679,7 +738,8 @@ function SettingsScreen({
 }) {
   const [defaultProvider, setDefaultProvider] = useState(meta?.settings.default_provider || "mock");
   const [geminiKey, setGeminiKey] = useState(() => readGeminiKey());
-  const [geminiModel, setGeminiModel] = useState(meta?.settings.gemini_model || "gemini-2.0-flash");
+  const [geminiModel, setGeminiModel] = useState(meta?.settings.gemini_model || "gemini-flash-latest");
+  const [geminiModels, setGeminiModels] = useState<string[]>([]);
   const [ollamaUrl, setOllamaUrl] = useState(meta?.settings.ollama_base_url || "http://127.0.0.1:11434");
   const [ollamaModel, setOllamaModel] = useState(meta?.settings.ollama_model || "llama3.2");
   const [ok, setOk] = useState("");
@@ -687,10 +747,22 @@ function SettingsScreen({
   useEffect(() => {
     if (!meta) return;
     setDefaultProvider(meta.settings.default_provider || "mock");
-    setGeminiModel(meta.settings.gemini_model || "gemini-2.0-flash");
+    setGeminiModel(meta.settings.gemini_model || "gemini-flash-latest");
     setOllamaUrl(meta.settings.ollama_base_url || "http://127.0.0.1:11434");
     setOllamaModel(meta.settings.ollama_model || "llama3.2");
   }, [meta]);
+
+  useEffect(() => {
+    const key = geminiKey.trim();
+    if (!key && !meta?.settings.gemini_api_key_set) {
+      setGeminiModels([]);
+      return;
+    }
+    api
+      .listGeminiModels(key || undefined)
+      .then((data) => setGeminiModels(data.models))
+      .catch(() => setGeminiModels([]));
+  }, [geminiKey, meta]);
 
   async function save() {
     setBusy(true);
@@ -757,7 +829,24 @@ function SettingsScreen({
         </label>
         <label className="field">
           Modelo Gemini
-          <input value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)} />
+          {geminiModels.length > 0 ? (
+            <select value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)}>
+              {geminiModels.includes(geminiModel) ? null : (
+                <option value={geminiModel}>{geminiModel}</option>
+              )}
+              {geminiModels.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              value={geminiModel}
+              onChange={(e) => setGeminiModel(e.target.value)}
+              placeholder="gemini-flash-latest"
+            />
+          )}
         </label>
         <label className="field">
           URL do Ollama
