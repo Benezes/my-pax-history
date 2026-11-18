@@ -434,7 +434,7 @@ class NewGameRequest(BaseModel):
 
 
 class QueueActionRequest(BaseModel):
-    text: str = Field(min_length=3, max_length=4000)
+    text: str = Field(min_length=3, max_length=12000)
 
 
 class AdvanceRequest(BaseModel):
@@ -442,11 +442,11 @@ class AdvanceRequest(BaseModel):
 
 
 class AdvisorRequest(BaseModel):
-    message: str = Field(min_length=2, max_length=4000)
+    message: str = Field(min_length=2, max_length=8000)
 
 
 class WhatIfRequest(BaseModel):
-    text: str = Field(min_length=3, max_length=4000)
+    text: str = Field(min_length=3, max_length=12000)
 
 
 class SaveRequest(BaseModel):
@@ -456,6 +456,11 @@ class SaveRequest(BaseModel):
 class SettingsUpdate(BaseModel):
     gemini_api_key: str | None = None
     gemini_model: str | None = None
+    gemini_fallback_models: str | None = None
     ollama_base_url: str | None = None
     ollama_model: str | None = None
     default_provider: str | None = None
+
+
+class GeminiModelsRequest(BaseModel):
+    api_key: str | None = None

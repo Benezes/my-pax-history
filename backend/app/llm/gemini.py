@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+from typing import Any, Callable
 
 import httpx
 
@@ -10,15 +11,113 @@ from app.llm.jsonutil import JsonParseError, parse_model
 from app.llm.prompts import advisor_prompt, estimate_prompt, turn_prompt
 from app.models import AdvisorReply, GameState, TurnLlmBundle
 
-GEMINI_MODELS = ("gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash")
+GEMINI_DEFAULT = "gemini-flash-latest"
+GEMINI_STALE = frozenset({"gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"})
+GEMINI_FALLBACKS = (
+    "gemini-flash-latest",
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-pro-latest",
+)
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
+RETRY_STATUSES = {429, 503}
+SKIP_STATUSES = {404}
+BACKOFF_SECONDS = (0.4, 0.9)
+
+
+def _headers(api_key: str) -> dict[str, str]:
+    return {"x-goog-api-key": api_key, "Content-Type": "application/json"}
+
+
+def _model_id(name: str) -> str:
+    text = (name or "").strip()
+    if text.startswith("models/"):
+        return text.split("/", 1)[1]
+    return text
+
+
+def resolve_gemini_model(raw: str | None) -> str:
+    model = _model_id(raw or "") or GEMINI_DEFAULT
+    if model in GEMINI_STALE:
+        return GEMINI_DEFAULT
+    return model
+
+
+def parse_fallback_list(raw: str | None) -> list[str]:
+    if not raw:
+        return list(GEMINI_FALLBACKS)
+    items = [_model_id(part) for part in raw.split(",") if part.strip()]
+    return items or list(GEMINI_FALLBACKS)
+
+
+def _candidate_models(preferred: str, extras: list[str]) -> list[str]:
+    ordered: list[str] = []
+    for item in [preferred, *extras, *GEMINI_FALLBACKS]:
+        name = _model_id(item)
+        if name and name not in ordered:
+            ordered.append(name)
+    return ordered
+
+
+async def list_gemini_models(api_key: str, client: httpx.AsyncClient | None = None) -> list[str]:
+    key = (api_key or "").strip()
+    if not key:
+        raise ProviderError("Chave da API Gemini ausente. Informe a chave em Configurações.")
+    own = client is None
+    http = client or httpx.AsyncClient(timeout=30.0)
+    try:
+        response = await http.get(f"{GEMINI_BASE}/models", headers=_headers(key))
+    except httpx.HTTPError as exc:
+        raise ProviderError(f"Não foi possível listar os modelos Gemini ({exc.__class__.__name__}).") from exc
+    finally:
+        if own:
+            await http.aclose()
+    if response.status_code in {401, 403}:
+        raise ProviderError("Chave da API Gemini inválida ou sem permissão. Verifique a chave em Configurações.")
+    if response.status_code >= 400:
+        raise ProviderError(_pt_http_error(response.status_code, response.text))
+    payload = response.json()
+    models: list[str] = []
+    for item in payload.get("models") or []:
+        methods = item.get("supportedGenerationMethods") or []
+        if "generateContent" not in methods:
+            continue
+        name = _model_id(item.get("name") or "")
+        if name:
+            models.append(name)
+    return models
+
+
+def _pt_http_error(status: int, body: str) -> str:
+    lowered = (body or "").lower()
+    if status == 404 or "no longer available" in lowered:
+        return "Este modelo Gemini não está mais disponível. Escolha outro em Configurações."
+    if status == 429:
+        return "O Gemini recusou a requisição por limite de uso. Aguarde um momento e tente de novo."
+    if status == 503 or "high demand" in lowered:
+        return "O Gemini está com demanda alta no momento. Tentando outro modelo."
+    if status in {401, 403}:
+        return "Chave da API Gemini inválida ou sem permissão. Verifique a chave em Configurações."
+    return f"O Gemini retornou um erro (HTTP {status})."
 
 
 class GeminiProvider(LlmProvider):
     provider_id = ProviderId.GEMINI
 
-    def __init__(self, api_key: str, model: str | None = None):
+    def __init__(
+        self,
+        api_key: str,
+        model: str | None = None,
+        fallbacks: list[str] | None = None,
+        client_factory: Callable[[], httpx.AsyncClient] | None = None,
+        sleeper: Callable[[float], Any] | None = None,
+    ):
         self.api_key = (api_key or "").strip()
-        self.model = (model or GEMINI_MODELS[0]).strip()
+        self.model = resolve_gemini_model(model)
+        self.fallbacks = fallbacks if fallbacks is not None else list(GEMINI_FALLBACKS)
+        self._client_factory = client_factory
+        self._sleeper = sleeper or asyncio.sleep
 
     async def health(self) -> dict[str, Any]:
         if not self.api_key:
@@ -35,42 +134,53 @@ class GeminiProvider(LlmProvider):
                 "Chave da API Gemini ausente ou inválida. Defina GEMINI_API_KEY no arquivo .env "
                 "ou informe a chave em Configurações (fica só neste computador)."
             )
-        models = [self.model, *[item for item in GEMINI_MODELS if item != self.model]]
+        models = _candidate_models(self.model, self.fallbacks)
         last_error = "Falha ao contatar o Gemini."
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        client = self._client_factory() if self._client_factory else httpx.AsyncClient(timeout=45.0)
+        try:
             for model in models:
-                url = (
-                    "https://generativelanguage.googleapis.com/v1beta/models/"
-                    f"{model}:generateContent"
-                )
-                try:
-                    response = await client.post(
-                        url,
-                        params={"key": self.api_key},
-                        json={
-                            "contents": [{"parts": [{"text": prompt}]}],
-                            "generationConfig": {
-                                "temperature": 0.4,
-                                "responseMimeType": "application/json",
+                for attempt, delay in enumerate((0.0, *BACKOFF_SECONDS)):
+                    if delay:
+                        await self._sleeper(delay)
+                    url = f"{GEMINI_BASE}/models/{model}:generateContent"
+                    try:
+                        response = await client.post(
+                            url,
+                            headers=_headers(self.api_key),
+                            json={
+                                "contents": [{"parts": [{"text": prompt}]}],
+                                "generationConfig": {
+                                    "temperature": 0.4,
+                                    "responseMimeType": "application/json",
+                                },
                             },
-                        },
-                    )
-                except httpx.HTTPError as exc:
-                    last_error = f"Não foi possível alcançar o Gemini ({exc.__class__.__name__})."
-                    continue
-                if response.status_code in {401, 403}:
-                    raise ProviderError(
-                        "Chave da API Gemini inválida ou sem permissão. Verifique a chave em Configurações."
-                    )
-                if response.status_code >= 400:
-                    last_error = f"Gemini retornou HTTP {response.status_code}."
-                    continue
-                payload = response.json()
-                try:
-                    return payload["candidates"][0]["content"]["parts"][0]["text"]
-                except (KeyError, IndexError, TypeError):
-                    last_error = "Resposta vazia do Gemini."
-                    continue
+                        )
+                    except httpx.HTTPError as exc:
+                        last_error = f"Não foi possível alcançar o Gemini ({exc.__class__.__name__})."
+                        break
+                    if response.status_code in {401, 403}:
+                        raise ProviderError(
+                            "Chave da API Gemini inválida ou sem permissão. Verifique a chave em Configurações."
+                        )
+                    if response.status_code in SKIP_STATUSES:
+                        last_error = _pt_http_error(response.status_code, response.text)
+                        break
+                    if response.status_code in RETRY_STATUSES:
+                        last_error = _pt_http_error(response.status_code, response.text)
+                        if attempt < len(BACKOFF_SECONDS):
+                            continue
+                        break
+                    if response.status_code >= 400:
+                        last_error = _pt_http_error(response.status_code, response.text)
+                        break
+                    payload = response.json()
+                    try:
+                        return payload["candidates"][0]["content"]["parts"][0]["text"]
+                    except (KeyError, IndexError, TypeError):
+                        last_error = "Resposta vazia do Gemini."
+                        break
+        finally:
+            await client.aclose()
         raise ProviderError(last_error)
 
     async def _bundle(self, prompt: str) -> TurnLlmBundle:

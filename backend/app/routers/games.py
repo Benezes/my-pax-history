@@ -6,6 +6,7 @@ from app.engine.newgame import create_new_game
 from app.engine.turn import advance_months, queue_action
 from app.engine.whatif import build_what_if
 from app.llm.base import ProviderError
+from app.llm.gemini import resolve_gemini_model
 from app.llm.mock import MockProvider
 from app.llm.registry import get_provider
 from app.models import (
@@ -61,7 +62,7 @@ async def new_game(body: NewGameRequest):
     settings = merged_settings(body.api_key)
     model = ""
     if body.provider == "gemini":
-        model = body.gemini_model or settings.get("gemini_model") or "gemini-2.0-flash"
+        model = resolve_gemini_model(body.gemini_model or settings.get("gemini_model"))
         settings["gemini_model"] = model
         if body.api_key:
             settings["gemini_api_key"] = body.api_key

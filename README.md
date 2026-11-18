@@ -39,7 +39,9 @@ Abra [http://127.0.0.1:5173](http://127.0.0.1:5173). Backend em `http://127.0.0.
 
 **Configurações** na tela inicial ou no jogo: provedor padrão, modelo Gemini, URL/modelo Ollama. A chave Gemini fica só neste computador (navegador + SQLite local).
 
-Se o globo WebGL não desenhar (GPU ausente, renderização por software, textura falha), o mapa SVG entra sozinho. Forçar: `http://127.0.0.1:5173/?globe=fallback`.
+Se o globo WebGL não desenhar (GPU ausente, renderização por software, textura falha), o mapa SVG entra sozinho. Forçar: `http://127.0.0.1:5173/?globe=fallback`. Os dois modos desenham fronteiras reais (Natural Earth 110m, domínio público, arquivo local em `frontend/public/globe/countries.geojson`).
+
+Ações longas: até 12.000 caracteres, com contador no campo. Erros de validação aparecem em português.
 
 Na nova partida:
 
@@ -78,8 +80,10 @@ Não chama rede. Serve para aprender o jogo e para desenvolvimento.
 
 ```bash
 GEMINI_API_KEY=sua_chave
-GEMINI_MODEL=gemini-2.0-flash
+GEMINI_MODEL=gemini-flash-latest
 ```
+
+O padrão é o alias `gemini-flash-latest` (não um número de versão que some). Em **Configurações**, com a chave preenchida, a lista de modelos vem da API ListModels. Se um modelo responder 404/429/503, o jogo tenta de novo e cai para a lista de reserva.
 
 Ou cole a chave na tela de nova partida / Configurações. Ela fica só no SQLite local (`backend/data/`), nunca no repositório.
 

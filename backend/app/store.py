@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 
+from app.llm.gemini import GEMINI_DEFAULT, resolve_gemini_model
 from app.models import GameState
 from app.paths import DATA_DIR, DB_PATH
 
@@ -106,7 +107,9 @@ def settings_public(raw: dict[str, str], env_key_present: bool) -> dict:
     gemini = raw.get("gemini_api_key") or ""
     return {
         "gemini_api_key_set": bool(gemini) or env_key_present,
-        "gemini_model": raw.get("gemini_model") or "gemini-2.0-flash",
+        "gemini_model": resolve_gemini_model(raw.get("gemini_model") or GEMINI_DEFAULT),
+        "gemini_fallback_models": raw.get("gemini_fallback_models")
+        or "gemini-flash-latest,gemini-3.8-flash,gemini-3.5-flash,gemini-3.1-flash-lite,gemini-pro-latest",
         "ollama_base_url": raw.get("ollama_base_url") or "http://127.0.0.1:11434",
         "ollama_model": raw.get("ollama_model") or "llama3.2",
         "default_provider": raw.get("default_provider") or "mock",
