@@ -6,6 +6,9 @@ interface Props {
   countries: MapCountry[];
 }
 
+const LOCAL_EARTH = "/globe/earth-night.jpg";
+const SOFTWARE_GL = /llvmpipe|swiftshader|softpipe|microsoft basic render|mesa offscreen/i;
+
 class GlobeBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { failed: boolean }> {
   state = { failed: false };
 
@@ -18,18 +21,66 @@ class GlobeBoundary extends Component<{ children: ReactNode; fallback: ReactNode
   }
 }
 
-function canUseWebGl() {
+function forcedFallback() {
+  if (typeof window === "undefined") return false;
+  const params = new URLSearchParams(window.location.search);
+  return params.get("globe") === "fallback" || params.get("globe") === "svg";
+}
+
+function hardwareWebGlAvailable() {
+  if (typeof document === "undefined") return false;
   try {
     const canvas = document.createElement("canvas");
-    return Boolean(canvas.getContext("webgl2") || canvas.getContext("webgl"));
+    const gl =
+      canvas.getContext("webgl", { failIfMajorPerformanceCaveat: true }) ||
+      canvas.getContext("experimental-webgl", { failIfMajorPerformanceCaveat: true });
+    if (!gl || !(gl instanceof WebGLRenderingContext)) {
+      return false;
+    }
+    const info = gl.getExtension("WEBGL_debug_renderer_info");
+    if (info) {
+      const renderer = String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL) || "");
+      if (SOFTWARE_GL.test(renderer)) {
+        return false;
+      }
+    }
+    return true;
   } catch {
     return false;
   }
 }
 
+function canvasLooksEmpty(canvas: HTMLCanvasElement) {
+  try {
+    const gl = canvas.getContext("webgl") || canvas.getContext("webgl2");
+    if (!gl) return true;
+    const width = 32;
+    const height = 32;
+    const x = Math.max(0, Math.floor(canvas.width / 2 - width / 2));
+    const y = Math.max(0, Math.floor(canvas.height / 2 - height / 2));
+    const pixels = new Uint8Array(width * height * 4);
+    gl.readPixels(x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    let minSum = 765;
+    let maxSum = 0;
+    let total = 0;
+    let count = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const sum = pixels[i] + pixels[i + 1] + pixels[i + 2];
+      minSum = Math.min(minSum, sum);
+      maxSum = Math.max(maxSum, sum);
+      total += sum;
+      count += 1;
+    }
+    if (count === 0) return true;
+    return maxSum - minSum < 12 && total / count < 40;
+  } catch {
+    return true;
+  }
+}
+
 export default function GlobeView({ countries }: Props) {
-  const [webgl] = useState(canUseWebGl);
-  if (!webgl) {
+  const [allowWebgl] = useState(() => !forcedFallback() && hardwareWebGlAvailable());
+  if (!allowWebgl) {
     return <FallbackGlobe countries={countries} />;
   }
   return (
@@ -44,6 +95,7 @@ function WebGlGlobe({ countries }: Props) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const [size, setSize] = useState({ w: 0, h: 520 });
   const [failed, setFailed] = useState(false);
+  const [textureUrl, setTextureUrl] = useState(LOCAL_EARTH);
 
   const brazil = countries.find((item) => item.iso === "BRA");
   const highlighted = countries.filter((item) => item.highlight);
@@ -62,6 +114,13 @@ function WebGlGlobe({ countries }: Props) {
   );
 
   useEffect(() => {
+    const image = new Image();
+    image.onload = () => setTextureUrl(LOCAL_EARTH);
+    image.onerror = () => setFailed(true);
+    image.src = LOCAL_EARTH;
+  }, []);
+
+  useEffect(() => {
     if (!ref.current) return;
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
@@ -73,36 +132,47 @@ function WebGlGlobe({ countries }: Props) {
 
   useEffect(() => {
     try {
-      globeRef.current?.pointOfView({ lat: -12, lng: -48, altitude: 2.15 }, 900);
+      globeRef.current?.pointOfView({ lat: -12, lng: -48, altitude: 2.15 }, 0);
     } catch {
       setFailed(true);
     }
-  }, []);
+  }, [size.w]);
 
   useEffect(() => {
     const focus = highlighted.find((item) => item.iso !== "BRA") || brazil;
     if (focus) {
       try {
-        globeRef.current?.pointOfView({ lat: focus.lat, lng: focus.lng, altitude: 2.2 }, 1200);
+        globeRef.current?.pointOfView({ lat: focus.lat, lng: focus.lng, altitude: 2.2 }, 800);
       } catch {
         setFailed(true);
       }
     }
   }, [highlightKey]);
 
+  useEffect(() => {
+    if (failed || size.w <= 0) return;
+    const timer = window.setTimeout(() => {
+      const canvas = ref.current?.querySelector("canvas");
+      if (!canvas || canvasLooksEmpty(canvas)) {
+        setFailed(true);
+      }
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [failed, size.w, textureUrl]);
+
   if (failed) {
     return <FallbackGlobe countries={countries} />;
   }
 
   return (
-    <div className="globe-wrap" ref={ref}>
+    <div className="globe-wrap" ref={ref} data-globe-mode="webgl">
       {size.w > 0 && (
         <Globe
           ref={globeRef}
           width={size.w}
           height={size.h}
           backgroundColor="#050b10"
-          globeImageUrl="https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg"
+          globeImageUrl={textureUrl}
           atmosphereColor="#6aa88a"
           atmosphereAltitude={0.18}
           pointsData={countries}
@@ -167,7 +237,7 @@ function FallbackGlobe({ countries }: Props) {
     .filter((item): item is MapCountry & { px: number; py: number; z: number } => item !== null);
 
   return (
-    <div className="globe-wrap">
+    <div className="globe-wrap" data-globe-mode="fallback">
       <svg
         viewBox={`0 0 ${width} ${height}`}
         width="100%"
@@ -209,7 +279,7 @@ function FallbackGlobe({ countries }: Props) {
           </g>
         ))}
       </svg>
-      <div className="globe-caption">Arraste o globo · países recentes destacados</div>
+      <div className="globe-caption">Países envolvidos nos acontecimentos recentes · mapa 2D</div>
     </div>
   );
 }

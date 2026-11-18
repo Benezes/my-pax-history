@@ -4,11 +4,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
-  echo "Ambiente Python ausente. Rode: make install"
+  echo "Ambiente Python ausente. Rode: ./install.sh"
   exit 1
 fi
 if [[ ! -d "$ROOT/frontend/node_modules" ]]; then
-  echo "Dependências do frontend ausentes. Rode: make install"
+  echo "Dependências do frontend ausentes. Rode: ./install.sh"
   exit 1
 fi
 

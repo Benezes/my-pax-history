@@ -49,5 +49,5 @@ export const api = {
     request<{ save: SaveRow }>(`/api/games/${id}/save`, { method: "POST", body: JSON.stringify({ name }) }),
   load: (id: string) => request<Game>(`/api/games/${id}/load`, { method: "POST" }),
   saveSettings: (body: Record<string, string>) =>
-    request("/api/settings", { method: "POST", body: JSON.stringify(body) }),
+    request<MetaResponse["settings"]>("/api/settings", { method: "POST", body: JSON.stringify(body) }),
 };

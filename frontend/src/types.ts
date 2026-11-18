@@ -1,4 +1,4 @@
-export type View = "title" | "new" | "load" | "game";
+export type View = "title" | "new" | "load" | "game" | "settings";
 
 export interface ProviderInfo {
   id: string;
@@ -20,6 +20,7 @@ export interface MetaResponse {
     gemini_model: string;
     ollama_base_url: string;
     ollama_model: string;
+    default_provider: string;
   };
 }
 
@@ -79,7 +80,7 @@ export interface ResolvedAction {
   passed: boolean;
   reason: string;
   category: string;
-  execution: "full" | "partial" | "blocked";
+  execution: "full" | "partial" | "blocked" | "rejected";
   scale: number;
   fiscal_cost_brl_bi: number;
   political_cost: number;
@@ -110,7 +111,7 @@ export interface WhatIfResult {
   political_cost: number;
   fiscal_available: number;
   political_available: number;
-  execution: "full" | "partial" | "blocked";
+  execution: "full" | "partial" | "blocked" | "rejected";
   scale: number;
   resource_message: string;
   requires_congress: boolean;
@@ -153,6 +154,7 @@ export interface Game {
   problems: Array<{ id: string; title: string; severity: number }>;
   pending_actions: Array<{ id: string; text: string }>;
   last_report: Report | null;
+  last_report_date_label?: string | null;
   last_resolved: ResolvedAction[];
   advisor_log: ChatMessage[];
   history: HistoryEntry[];

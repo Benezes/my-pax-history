@@ -186,7 +186,14 @@ async def advisor(game_id: str, body: AdvisorRequest):
 async def save(game_id: str, body: SaveRequest):
     state = _get(game_id)
     clone = snapshot(state, body.name)
-    return {"save": {"id": clone.id, "name": clone.name, "updated_at": clone.updated_at}}
+    return {
+        "save": {
+            "id": clone.id,
+            "name": body.name,
+            "game_name": clone.name,
+            "updated_at": clone.updated_at,
+        }
+    }
 
 
 @router.post("/games/{save_id}/load")
@@ -194,6 +201,5 @@ async def load_save(save_id: str):
     source = _get(save_id)
     clone = source.model_copy(deep=True)
     clone.id = source.id.split("-save-")[0] if "-save-" in source.id else source.id
-    clone.name = source.name
     save_game(clone, kind="active")
     return public_state(clone)

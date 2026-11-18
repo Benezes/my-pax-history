@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.constants import ELECTION_MONTH, ELECTION_YEAR, GameStatus, LOSS_REASONS
 from app.engine.apply import params, push_history
+from app.formatters import br_num
 from app.models import GameState
 
 
@@ -12,11 +13,11 @@ def apply_status(state: GameState, status: GameStatus) -> None:
     state.loss_body = info["body"]
     if status == GameStatus.WON_ELECTION and state.election_vote_share is not None:
         state.loss_body = (
-            f"{info['body']} Votação estimada pelo motor: {state.election_vote_share:.1f}%."
+            f"{info['body']} Votação estimada pelo motor: {br_num(state.election_vote_share, 1)}%."
         )
     if status == GameStatus.LOST_ELECTION and state.election_vote_share is not None:
         state.loss_body = (
-            f"{info['body']} Votação estimada pelo motor: {state.election_vote_share:.1f}%."
+            f"{info['body']} Votação estimada pelo motor: {br_num(state.election_vote_share, 1)}%."
         )
     push_history(state, "loss", info["title"], state.loss_body, ["BRA"])
 

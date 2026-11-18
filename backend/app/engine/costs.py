@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.constants import DIFFICULTY_PARAMS, FISCAL_COST_BRL_BI, POLITICAL_COST, SCOPE_ORDER
+from app.formatters import br_num
 from app.models import ActionCost, ActionProposal, GameState, ResourceVerdict
 
 
@@ -71,8 +72,8 @@ def verdict(state: GameState, cost: ActionCost) -> ResourceVerdict:
             fiscal_spent=cost.fiscal_brl_bi,
             political_spent=cost.political,
             message=(
-                f"Custo: R$ {cost.fiscal_brl_bi:.1f} bi de espaço fiscal e "
-                f"{cost.political:.0f} de capital político."
+                f"Custo: R$ {br_num(cost.fiscal_brl_bi, 1)} bi de espaço fiscal e "
+                f"{br_num(cost.political, 0)} de capital político."
             ),
         )
     scale = min(fiscal_ratio, political_ratio, 1.0)
@@ -80,13 +81,13 @@ def verdict(state: GameState, cost: ActionCost) -> ResourceVerdict:
         reasons: list[str] = []
         if fiscal_ratio < floor:
             reasons.append(
-                f"espaço fiscal insuficiente (R$ {fiscal_avail:.1f} bi disponíveis, "
-                f"R$ {cost.fiscal_brl_bi:.1f} bi necessários)"
+                f"espaço fiscal insuficiente (R$ {br_num(fiscal_avail, 1)} bi disponíveis, "
+                f"R$ {br_num(cost.fiscal_brl_bi, 1)} bi necessários)"
             )
         if political_ratio < floor:
             reasons.append(
-                f"capital político insuficiente ({political_avail:.0f} disponíveis, "
-                f"{cost.political:.0f} necessários)"
+                f"capital político insuficiente ({br_num(political_avail, 0)} disponíveis, "
+                f"{br_num(cost.political, 0)} necessários)"
             )
         joined = " e ".join(reasons)
         return ResourceVerdict(
@@ -104,8 +105,8 @@ def verdict(state: GameState, cost: ActionCost) -> ResourceVerdict:
         fiscal_spent=round(fiscal_spent, 2),
         political_spent=round(political_spent, 2),
         message=(
-            f"Ação parcialmente executada ({scale * 100:.0f}%): os recursos cobrem só parte do custo "
-            f"(R$ {cost.fiscal_brl_bi:.1f} bi e {cost.political:.0f} de capital). "
+            f"Ação parcialmente executada ({br_num(scale * 100, 0)}%): os recursos cobrem só parte do custo "
+            f"(R$ {br_num(cost.fiscal_brl_bi, 1)} bi e {br_num(cost.political, 0)} de capital). "
             f"Efeitos e alcance foram reduzidos."
         ),
     )
