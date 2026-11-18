@@ -3,6 +3,7 @@ from __future__ import annotations
 from random import Random
 
 from app.constants import DIFFICULTY_PARAMS
+from app.formatters import br_num
 from app.models import ActionProposal, GameState, Party
 
 
@@ -69,13 +70,13 @@ def roll_vote(state: GameState, proposal: ActionProposal, rng: Random) -> tuple[
     chamber, senate = projected_votes(state, proposal)
     if passed:
         reason = (
-            f"Aprovado no Congresso (probabilidade {chance * 100:.0f}%; "
-            f"projeção Câmara {chamber * 100:.0f}%, Senado {senate * 100:.0f}%)."
+            f"Aprovado no Congresso (probabilidade {br_num(chance * 100, 0)}%; "
+            f"projeção Câmara {br_num(chamber * 100, 0)}%, Senado {br_num(senate * 100, 0)}%)."
         )
     else:
         reason = (
-            f"Rejeitado no Congresso (probabilidade {chance * 100:.0f}%; "
-            f"projeção Câmara {chamber * 100:.0f}%, Senado {senate * 100:.0f}%). "
+            f"Rejeitado no Congresso (probabilidade {br_num(chance * 100, 0)}%; "
+            f"projeção Câmara {br_num(chamber * 100, 0)}%, Senado {br_num(senate * 100, 0)}%). "
             f"A oposição e o centrão exploraram a fragilidade da base."
         )
     return passed, reason, chance

@@ -144,7 +144,13 @@ button { cursor: pointer; }
   overflow: auto;
   padding: 14px;
 }
-.panel.right { border-right: 0; border-left: 1px solid var(--line); }
+.panel.right {
+  border-right: 0;
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 .globe-wrap { position: relative; min-height: 420px; background: #050b10; }
 .globe-caption {
   position: absolute;
@@ -173,10 +179,10 @@ button { cursor: pointer; }
 .bubble { padding: 8px 10px; border-radius: 10px; background: #173044; font-size: 14px; }
 .bubble.user { background: #2a3a28; }
 .bubble.disagree { border: 1px solid var(--red); }
-.timeline { max-height: 240px; overflow: auto; }
+.timeline { flex: 1; min-height: 0; overflow: auto; }
 .t-item { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
 .t-item small { color: var(--muted); }
-.report { display: grid; gap: 8px; }
+.report { display: grid; gap: 8px; flex: 1; min-height: 0; overflow: auto; }
 .report article { background: #10202c; padding: 10px; border-radius: 10px; }
 .report h4 { color: var(--gold); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; }
 .whatif {
@@ -190,6 +196,7 @@ button { cursor: pointer; }
 .tag.full { background: #1d4a36; }
 .tag.partial { background: #5a4718; }
 .tag.blocked { background: #5a241c; }
+.tag.rejected { background: #5a241c; }
 .over {
   min-height: 100vh;
   display: grid;

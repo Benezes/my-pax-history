@@ -3,16 +3,36 @@ import { api } from "./api";
 import GlobeView from "./components/GlobeView";
 import type { Game, MetaResponse, SaveRow, View, WhatIfResult } from "./types";
 
+const GEMINI_KEY_STORAGE = "presidencia.geminiApiKey";
+
 const MONEY = (n: number) =>
   n.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const NUM = (n: number, digits = 1) =>
   n.toLocaleString("pt-BR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+const PCT = (n: number, digits = 1) => `${NUM(n, digits)}%`;
+
+function readGeminiKey() {
+  try {
+    return localStorage.getItem(GEMINI_KEY_STORAGE) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeGeminiKey(value: string) {
+  try {
+    if (value) localStorage.setItem(GEMINI_KEY_STORAGE, value);
+    else localStorage.removeItem(GEMINI_KEY_STORAGE);
+  } catch {
+    return;
+  }
+}
 
 function formatIndicator(id: string, value: number) {
   if (id === "public_debt_gdp") return `${NUM(value)}% PIB`;
   if (id === "crime_index") return NUM(value, 0);
   if (["selic", "inflation", "unemployment", "gdp_growth", "poverty", "approval"].includes(id)) {
-    return `${NUM(value)}%`;
+    return PCT(value);
   }
   return NUM(value);
 }
@@ -72,6 +92,26 @@ export default function App() {
       />
     );
   }
+  if (view === "settings") {
+    return (
+      <SettingsScreen
+        meta={meta}
+        error={error}
+        busy={busy}
+        onBack={() => setView(game ? "game" : "title")}
+        onSaved={async () => {
+          try {
+            setMeta(await api.meta());
+          } catch {
+            return;
+          }
+          setError("");
+        }}
+        setBusy={setBusy}
+        setError={setError}
+      />
+    );
+  }
   if (view === "game" && game) {
     return (
       <GameScreen
@@ -81,6 +121,7 @@ export default function App() {
         setError={setError}
         busy={busy}
         setBusy={setBusy}
+        onSettings={() => setView("settings")}
         onExit={() => {
           setGame(null);
           setView("title");
@@ -104,6 +145,9 @@ export default function App() {
           </button>
           <button className="btn" onClick={() => setView("load")}>
             Carregar
+          </button>
+          <button className="btn" onClick={() => setView("settings")}>
+            Configurações
           </button>
         </div>
       </div>
@@ -130,11 +174,16 @@ function NewGame({
     name?: string;
   }) => Promise<void>;
 }) {
-  const [provider, setProvider] = useState("mock");
+  const [provider, setProvider] = useState(meta?.settings.default_provider || "mock");
   const [difficulty, setDifficulty] = useState("medio");
-  const [apiKey, setApiKey] = useState("");
+  const [apiKey, setApiKey] = useState(() => readGeminiKey());
   const [ollamaModel, setOllamaModel] = useState(meta?.settings.ollama_model || "llama3.2");
   const [name, setName] = useState("Governo 2027");
+
+  useEffect(() => {
+    if (meta?.settings.default_provider) setProvider(meta.settings.default_provider);
+    if (meta?.settings.ollama_model) setOllamaModel(meta.settings.ollama_model);
+  }, [meta]);
 
   return (
     <div className="screen">
@@ -203,15 +252,16 @@ function NewGame({
         <button
           className="btn primary"
           disabled={busy}
-          onClick={() =>
+          onClick={() => {
+            if (apiKey.trim()) writeGeminiKey(apiKey.trim());
             onCreate({
               difficulty,
               provider,
               api_key: apiKey || undefined,
               ollama_model: provider === "ollama" ? ollamaModel : undefined,
               name,
-            })
-          }
+            });
+          }}
         >
           {busy ? "Preparando o Palácio..." : "Assumir a Presidência"}
         </button>
@@ -273,6 +323,7 @@ function GameScreen({
   setError,
   busy,
   setBusy,
+  onSettings,
   onExit,
 }: {
   game: Game;
@@ -281,6 +332,7 @@ function GameScreen({
   setError: (s: string) => void;
   busy: boolean;
   setBusy: (b: boolean) => void;
+  onSettings: () => void;
   onExit: () => void;
 }) {
   const [tab, setTab] = useState<"report" | "history" | "advisor">("report");
@@ -362,8 +414,8 @@ function GameScreen({
           <h1>{game.loss_title || "Fim de governo"}</h1>
           <p>{game.loss_body}</p>
           <p>
-            Aprovação final {NUM(game.indicator_map.approval)}% · coalizão{" "}
-            {NUM(game.congress.coalition_support, 0)}%
+            Aprovação final {PCT(game.indicator_map.approval)} · coalizão{" "}
+            {PCT(game.congress.coalition_support, 0)}
           </p>
           <div className="row">
             <button className="btn primary" onClick={onExit}>
@@ -381,7 +433,7 @@ function GameScreen({
         <div className="brand">
           <strong>Presidência da República</strong>
           <span className="muted">
-            {game.date_label} · {game.difficulty_label} · {game.provider_label}
+            {game.name} · {game.date_label} · {game.difficulty_label} · {game.provider_label}
           </span>
         </div>
         <div className="resources">
@@ -408,6 +460,9 @@ function GameScreen({
           <input value={saveName} onChange={(e) => setSaveName(e.target.value)} style={{ width: 140 }} />
           <button className="btn" onClick={save} disabled={busy}>
             Salvar
+          </button>
+          <button className="btn" onClick={onSettings} disabled={busy}>
+            Configurações
           </button>
           <button className="btn ghost" onClick={onExit}>
             Sair
@@ -436,7 +491,7 @@ function GameScreen({
             <b>{NUM(game.coup_risk, 0)}</b>
           </div>
           <h3 style={{ marginTop: 16 }}>Congresso</h3>
-          <p className="muted">Apoio da coalizão {NUM(game.congress.coalition_support, 0)}%</p>
+          <p className="muted">Apoio da coalizão {PCT(game.congress.coalition_support, 0)}</p>
           <h3 style={{ marginTop: 16 }}>Agentes</h3>
           {game.agents.map((agent) => (
             <div className="agent" key={agent.id}>
@@ -506,23 +561,23 @@ function GameScreen({
           {tab === "report" && (
             <div className="report">
               {game.last_resolved.map((item) => (
-                  <article key={item.title}>
-                    <h4>{item.title}</h4>
-                    {" "}
-                    <span className={`tag ${item.passed ? item.execution : "blocked"}`}>
-                    {!item.passed
-                      ? item.execution === "blocked"
-                        ? "bloqueada"
-                        : "rejeitada"
-                      : item.execution === "full"
-                        ? "executada"
-                        : "parcial"}
+                <article key={item.title}>
+                  <h4>{item.title}</h4>
+                  <span className={`tag ${item.execution}`}>
+                    {item.execution === "blocked"
+                      ? "bloqueada"
+                      : item.execution === "rejected" || !item.passed
+                        ? "rejeitada"
+                        : item.execution === "full"
+                          ? "executada"
+                          : "parcial"}
                   </span>
                   <p>{item.reason}</p>
                 </article>
               ))}
               {game.last_report ? (
                 <>
+                  <div className="kicker">Relatório — {game.last_report_date_label || game.date_label}</div>
                   <article>
                     <h4>Economia</h4>
                     <p>{game.last_report.economia}</p>
@@ -559,17 +614,20 @@ function GameScreen({
           )}
           {tab === "history" && (
             <div className="timeline">
-              {[...game.history].reverse().map((item) => (
-                <div className="t-item" key={item.id}>
-                  <small>
-                    {item.date_label} · {item.kind}
-                  </small>
-                  <div>
-                    <b>{item.title}</b>
+              {[...game.history]
+                .slice()
+                .sort((a, b) => b.month_index - a.month_index || b.id.localeCompare(a.id))
+                .map((item) => (
+                  <div className="t-item" key={item.id}>
+                    <small>
+                      {item.date_label} · {item.kind}
+                    </small>
+                    <div>
+                      <b>{item.title}</b>
+                    </div>
+                    <div className="muted">{item.body}</div>
                   </div>
-                  <div className="muted">{item.body}</div>
-                </div>
-              ))}
+                ))}
             </div>
           )}
           {tab === "advisor" && (
@@ -602,6 +660,121 @@ function GameScreen({
   );
 }
 
+function SettingsScreen({
+  meta,
+  error,
+  busy,
+  onBack,
+  onSaved,
+  setBusy,
+  setError,
+}: {
+  meta: MetaResponse | null;
+  error: string;
+  busy: boolean;
+  onBack: () => void;
+  onSaved: () => Promise<void>;
+  setBusy: (b: boolean) => void;
+  setError: (s: string) => void;
+}) {
+  const [defaultProvider, setDefaultProvider] = useState(meta?.settings.default_provider || "mock");
+  const [geminiKey, setGeminiKey] = useState(() => readGeminiKey());
+  const [geminiModel, setGeminiModel] = useState(meta?.settings.gemini_model || "gemini-2.0-flash");
+  const [ollamaUrl, setOllamaUrl] = useState(meta?.settings.ollama_base_url || "http://127.0.0.1:11434");
+  const [ollamaModel, setOllamaModel] = useState(meta?.settings.ollama_model || "llama3.2");
+  const [ok, setOk] = useState("");
+
+  useEffect(() => {
+    if (!meta) return;
+    setDefaultProvider(meta.settings.default_provider || "mock");
+    setGeminiModel(meta.settings.gemini_model || "gemini-2.0-flash");
+    setOllamaUrl(meta.settings.ollama_base_url || "http://127.0.0.1:11434");
+    setOllamaModel(meta.settings.ollama_model || "llama3.2");
+  }, [meta]);
+
+  async function save() {
+    setBusy(true);
+    setError("");
+    setOk("");
+    try {
+      writeGeminiKey(geminiKey.trim());
+      const body: Record<string, string> = {
+        default_provider: defaultProvider,
+        gemini_model: geminiModel.trim(),
+        ollama_base_url: ollamaUrl.trim(),
+        ollama_model: ollamaModel.trim(),
+      };
+      if (geminiKey.trim()) body.gemini_api_key = geminiKey.trim();
+      await api.saveSettings(body);
+      await onSaved();
+      setOk("Configurações salvas neste computador.");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="screen">
+      <div className="setup">
+        <button className="btn ghost" onClick={onBack}>
+          ← Voltar
+        </button>
+        <div className="kicker">Preferências locais</div>
+        <h1>Configurações</h1>
+        <p className="muted">
+          Provedor padrão, modelo e URL do Ollama ficam no SQLite local. A chave Gemini é gravada
+          só neste navegador e, se preenchida, também no banco local — nunca no repositório.
+        </p>
+        {error && <div className="banner">{error}</div>}
+        {ok && <div className="ok">{ok}</div>}
+        <h3>Provedor padrão</h3>
+        <div className="cards">
+          {(meta?.providers || []).map((item) => (
+            <button
+              key={item.id}
+              className={`card ${defaultProvider === item.id ? "active" : ""}`}
+              onClick={() => setDefaultProvider(item.id)}
+            >
+              <h3>{item.label}</h3>
+              {item.status?.ok ? (
+                <div className="ok">Disponível</div>
+              ) : (
+                <div className="warn">{item.status?.message || "Verifique a configuração."}</div>
+              )}
+            </button>
+          ))}
+        </div>
+        <label className="field">
+          Chave Gemini (somente neste computador)
+          <input
+            type="password"
+            value={geminiKey}
+            onChange={(e) => setGeminiKey(e.target.value)}
+            placeholder={meta?.settings.gemini_api_key_set ? "Chave já configurada" : "AIza..."}
+          />
+        </label>
+        <label className="field">
+          Modelo Gemini
+          <input value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)} />
+        </label>
+        <label className="field">
+          URL do Ollama
+          <input value={ollamaUrl} onChange={(e) => setOllamaUrl(e.target.value)} />
+        </label>
+        <label className="field">
+          Modelo Ollama
+          <input value={ollamaModel} onChange={(e) => setOllamaModel(e.target.value)} />
+        </label>
+        <button className="btn primary" disabled={busy} onClick={save}>
+          {busy ? "Salvando..." : "Salvar configurações"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function WhatIfPanel({
   result,
   onConfirm,
@@ -617,7 +790,11 @@ function WhatIfPanel({
       <h3>{result.title}</h3>
       <p>{result.summary}</p>
       <span className={`tag ${result.execution}`}>
-        {result.execution === "full" ? "cabe no orçamento" : result.execution === "partial" ? "execução parcial" : "seria bloqueada"}
+        {result.execution === "full"
+          ? "cabe no orçamento"
+          : result.execution === "partial"
+            ? "execução parcial"
+            : "seria bloqueada"}
       </span>
       <p>
         Custo estimado: <b>R$ {MONEY(result.fiscal_cost_brl_bi)} bi</b> e{" "}
@@ -626,7 +803,7 @@ function WhatIfPanel({
       </p>
       <p>{result.resource_message}</p>
       {result.requires_congress && (
-        <p>Requer Congresso. Chance projetada de aprovação: {NUM(result.pass_chance * 100, 0)}%.</p>
+        <p>Requer Congresso. Chance projetada de aprovação: {PCT(result.pass_chance * 100, 0)}.</p>
       )}
       <p className="muted">{result.timing_note}</p>
       {result.likely_effects.length > 0 && (

@@ -7,6 +7,7 @@ from app.constants import (
     INDICATOR_LABELS,
     PROVIDER_LABELS,
 )
+from app.formatters import round_floats
 from app.models import GameState, MapCountry, WhatIfResult
 
 
@@ -56,7 +57,7 @@ def public_state(state: GameState) -> dict:
         for key, value in state.indicators.items()
         if key in INDICATOR_LABELS
     ]
-    return {
+    payload = {
         "id": state.id,
         "name": state.name,
         "created_at": state.created_at,
@@ -100,8 +101,10 @@ def public_state(state: GameState) -> dict:
         "approval_breakdown": state.approval_breakdown.model_dump(),
         "headlines": [item.model_dump() for item in state.headlines[-12:]],
         "memory_summary": state.memory_summary[-500:],
+        "last_report_date_label": state.date.label() if state.last_report else None,
     }
+    return round_floats(payload, 2)
 
 
 def public_what_if(result: WhatIfResult) -> dict:
-    return result.model_dump()
+    return round_floats(result.model_dump(), 2)

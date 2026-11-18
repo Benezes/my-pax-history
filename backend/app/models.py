@@ -18,7 +18,7 @@ ActionCategory = Literal[
     "other",
 ]
 ActionScope = Literal["small", "medium", "large", "massive"]
-ExecutionMode = Literal["full", "partial", "blocked"]
+ExecutionMode = Literal["full", "partial", "blocked", "rejected"]
 
 
 class GameDate(BaseModel):
@@ -458,3 +458,4 @@ class SettingsUpdate(BaseModel):
     gemini_model: str | None = None
     ollama_base_url: str | None = None
     ollama_model: str | None = None
+    default_provider: str | None = None

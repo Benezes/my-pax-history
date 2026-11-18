@@ -64,7 +64,10 @@ async def update_settings(body: SettingsUpdate):
         "gemini_model": body.gemini_model,
         "ollama_base_url": body.ollama_base_url,
         "ollama_model": body.ollama_model,
+        "default_provider": body.default_provider,
     }
+    if body.default_provider is not None and body.default_provider not in {item.value for item in ProviderId}:
+        raise HTTPException(status_code=400, detail="Provedor padrão inválido.")
     for key, value in mapping.items():
         if value is not None:
             put_setting(key, value.strip())

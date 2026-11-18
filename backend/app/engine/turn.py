@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from random import Random
 
 from app.constants import AGENT_IDS, GameStatus
+from app.formatters import agent_verb, br_num
 from app.engine.apply import (
     apply_delta,
     apply_macro,
@@ -86,8 +87,8 @@ def _anticipation(state: GameState, proposal: ActionProposal, rng: Random) -> No
     push_history(
         state,
         "agent",
-        f"{agent.name} antecipa o movimento",
-        f"{agent.name} age antes da medida se consolidar, protegendo interesses próprios.",
+        f"{agent.name} {agent_verb(agent_id, 'antecipa', 'antecipam')} o movimento",
+        f"{agent.name} {agent_verb(agent_id, 'age', 'agem')} antes da medida se consolidar, protegendo interesses próprios.",
         ["BRA"],
     )
 
@@ -132,8 +133,8 @@ def _apply_proposal(
             passed=False,
             reason=vote_reason + " O espaço fiscal não foi empenhado.",
             category=proposal.category,
-            execution=resource.mode,
-            scale=resource.scale,
+            execution="rejected",
+            scale=0.0,
             fiscal_cost_brl_bi=0.0,
             political_cost=resource.political_spent,
             countries=proposal.affected_countries,
@@ -292,37 +293,46 @@ def _world_drift(state: GameState, rng: Random) -> None:
 
 def _fallback_report(state: GameState, resolved: list[ResolvedAction]) -> ReportSection:
     blocked = [item for item in resolved if item.execution == "blocked"]
-    partial = [item for item in resolved if item.execution == "partial"]
+    rejected = [item for item in resolved if item.execution == "rejected"]
+    partial = [item for item in resolved if item.passed and item.execution == "partial"]
     passed = [item for item in resolved if item.passed]
     problems = sorted(state.problems, key=lambda item: item.severity, reverse=True)[:3]
-    problem_text = "; ".join(f"{item.title} (gravidade {item.severity:.0f})" for item in problems)
-    consequencias = "Nenhuma decisão presidencial neste mês."
+    problem_text = "; ".join(f"{item.title} (gravidade {br_num(item.severity, 0)})" for item in problems)
+    parts: list[str] = []
     if passed:
-        consequencias = "Decisões aplicadas: " + "; ".join(item.title for item in passed) + "."
+        parts.append("Decisões aplicadas: " + "; ".join(item.title for item in passed) + ".")
+    if rejected:
+        parts.append(
+            "O Congresso rejeitou: "
+            + "; ".join(item.title for item in rejected)
+            + ". Nenhum espaço fiscal foi empenhado."
+        )
     if partial:
-        consequencias += " Algumas medidas saíram pela metade por falta de recursos."
+        parts.append("Algumas medidas saíram pela metade por falta de recursos.")
     if blocked:
-        consequencias += " Medidas bloqueadas: " + "; ".join(item.title for item in blocked) + "."
+        parts.append("Medidas bloqueadas: " + "; ".join(item.title for item in blocked) + ".")
+    consequencias = " ".join(parts) if parts else "Nenhuma decisão presidencial neste mês."
     return ReportSection(
         economia=(
-            f"Selic em {state.indicators['selic']:.2f}%, inflação {state.indicators['inflation']:.2f}%, "
-            f"PIB {state.indicators['gdp_growth']:+.2f}%, dívida {state.indicators['public_debt_gdp']:.1f}% do PIB. "
-            f"Espaço fiscal: R$ {state.budget.fiscal_space_brl_bi:.1f} bi."
+            f"Selic em {br_num(state.indicators['selic'], 2)}%, inflação {br_num(state.indicators['inflation'], 2)}%, "
+            f"PIB {br_num(state.indicators['gdp_growth'], 2, signed=True)}%, "
+            f"dívida {br_num(state.indicators['public_debt_gdp'], 1)}% do PIB. "
+            f"Espaço fiscal: R$ {br_num(state.budget.fiscal_space_brl_bi, 1)} bi."
         ),
         politica=(
-            f"Apoio da coalizão em {state.congress.coalition_support:.0f}%. "
-            f"Relação Executivo–Legislativo: {state.branches.get('executive_legislative', 0):.0f}. "
-            f"Capital político: {state.indicators['political_capital']:.0f}."
+            f"Apoio da coalizão em {br_num(state.congress.coalition_support, 0)}%. "
+            f"Relação Executivo–Legislativo: {br_num(state.branches.get('executive_legislative', 0), 0)}. "
+            f"Capital político: {br_num(state.indicators['political_capital'], 0)}."
         ),
         seguranca=(
-            f"Índice de criminalidade em {state.indicators['crime_index']:.0f}. "
-            f"Estabilidade institucional: {state.indicators['institutional_stability']:.0f}."
+            f"Índice de criminalidade em {br_num(state.indicators['crime_index'], 0)}. "
+            f"Estabilidade institucional: {br_num(state.indicators['institutional_stability'], 0)}."
         ),
-        aprovacao=f"Aprovação presidencial em {state.indicators['approval']:.1f}%.",
+        aprovacao=f"Aprovação presidencial em {br_num(state.indicators['approval'], 1)}%.",
         relacoes_internacionais=(
             "Relações: "
             + ", ".join(
-                f"{power.name} {power.relation_brazil:.0f}"
+                f"{power.name} {br_num(power.relation_brazil, 0)}"
                 for power in list(state.powers.values())[:5]
             )
             + "."
@@ -369,21 +379,22 @@ def process_month(state: GameState, bundle: TurnLlmBundle, rng: Random) -> None:
         seguranca=facts.seguranca,
         aprovacao=facts.aprovacao,
         relacoes_internacionais=facts.relacoes_internacionais,
-        consequencias=llm_report.consequencias or facts.consequencias,
-        problemas=llm_report.problemas or facts.problemas,
+        consequencias=facts.consequencias,
+        problemas=facts.problemas or llm_report.problemas,
     )
     state.last_report = report
     if bundle.memory_update:
         state.memory_summary = (state.memory_summary + " " + bundle.memory_update).strip()[-4000:]
+    state.months_elapsed += 1
+    if state.status == GameStatus.PLAYING:
+        state.date = state.date.advance(1)
     push_history(
         state,
         "report",
         f"Relatório — {state.date.label()}",
-        report.problemas or report.consequencias or "Ciclo mensal concluído.",
+        report.consequencias or report.problemas or "Ciclo mensal concluído.",
         state.highlighted_countries[:6],
     )
-    state.months_elapsed += 1
-    state.date = state.date.advance(1)
     state.updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 

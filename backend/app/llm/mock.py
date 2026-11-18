@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.constants import ProviderId
+from app.formatters import agent_verb, br_num, tidy_pt
 from app.llm.base import LlmProvider
 from app.models import (
     ActionInterpretation,
@@ -360,13 +361,22 @@ def _reactions(state: GameState, proposal: ActionProposal) -> list[AgentReaction
         scaled = pressure * (0.7 if pressure > 0 else hostility)
         if scaled >= 2:
             kind = "support"
-            phrase = f"{agent.name} vê espaço para cooperar, cobrando contrapartidas."
+            phrase = (
+                f"{agent.name} {agent_verb(agent_id, 'vê', 'veem')} espaço para cooperar, "
+                "cobrando contrapartidas."
+            )
         elif scaled <= -3:
             kind = "oppose" if agent_id != "stf" else "investigate"
-            phrase = f"{agent.name} reage para proteger seus interesses e limitar o Planalto."
+            phrase = (
+                f"{agent.name} {agent_verb(agent_id, 'reage', 'reagem')} para proteger "
+                "seus interesses e limitar o Planalto."
+            )
         else:
             kind = "bargain"
-            phrase = f"{agent.name} espera o jogo e tenta barganhar."
+            phrase = (
+                f"{agent.name} {agent_verb(agent_id, 'espera', 'esperam')} o jogo e "
+                f"{agent_verb(agent_id, 'tenta', 'tentam')} barganhar."
+            )
         extra = []
         if kind == "oppose" and agent_id == "empresariado":
             extra = [IndicatorDelta(indicator="exchange_rate_usd", delta=0.06, delay_months=0)]
@@ -485,27 +495,31 @@ def _events(state: GameState, proposal: ActionProposal | None) -> list[EventProp
 
 
 def _report(state: GameState, proposal: ActionProposal | None) -> ReportSection:
-    action_txt = proposal.title if proposal else "Nenhuma iniciativa presidencial relevante."
+    if proposal:
+        consequencias = f"Foco do mês: {proposal.title}. Parte dos efeitos é defasada."
+    else:
+        consequencias = "Nenhuma iniciativa presidencial relevante neste mês."
     return ReportSection(
         economia=(
-            f"A economia opera com Selic em {state.indicators['selic']:.2f}% e inflação em "
-            f"{state.indicators['inflation']:.2f}%. O espaço fiscal residual é de "
-            f"R$ {state.budget.fiscal_space_brl_bi:.1f} bi."
+            f"A economia opera com Selic em {br_num(state.indicators['selic'], 2)}% e inflação em "
+            f"{br_num(state.indicators['inflation'], 2)}%. O espaço fiscal residual é de "
+            f"R$ {br_num(state.budget.fiscal_space_brl_bi, 1)} bi."
         ),
         politica=(
-            f"A base no Congresso segue estreita ({state.congress.coalition_support:.0f}%). "
-            f"Capital político em {state.indicators['political_capital']:.0f}."
+            f"A base no Congresso segue estreita ({br_num(state.congress.coalition_support, 0)}%). "
+            f"Capital político em {br_num(state.indicators['political_capital'], 0)}."
         ),
         seguranca=(
-            f"Criminalidade em {state.indicators['crime_index']:.0f} pontos. "
-            f"As Forças Armadas estão com stance {state.agents['forcas_armadas'].stance:.0f}."
+            f"Criminalidade em {br_num(state.indicators['crime_index'], 0)} pontos. "
+            f"As Forças Armadas estão com stance {br_num(state.agents['forcas_armadas'].stance, 0)}."
         ),
-        aprovacao=f"A aprovação está em {state.indicators['approval']:.1f}%. Polarização permanece.",
+        aprovacao=f"A aprovação está em {br_num(state.indicators['approval'], 1)}%. Polarização permanece.",
         relacoes_internacionais=(
-            f"EUA {state.powers['USA'].relation_brazil:.0f}, China {state.powers['CHN'].relation_brazil:.0f}, "
-            f"UE {state.powers['EU'].relation_brazil:.0f}."
+            f"EUA {br_num(state.powers['USA'].relation_brazil, 0)}, "
+            f"China {br_num(state.powers['CHN'].relation_brazil, 0)}, "
+            f"UE {br_num(state.powers['EU'].relation_brazil, 0)}."
         ),
-        consequencias=f"Foco do mês: {action_txt}. Parte dos efeitos é defasada.",
+        consequencias=tidy_pt(consequencias),
         problemas="; ".join(p.title for p in state.problems[:3]),
     )
 
@@ -556,10 +570,10 @@ class MockProvider(LlmProvider):
             return AdvisorReply(
                 reply=(
                     "Discordo. Essa linha rompe o equilíbrio institucional e acelera impeachment ou crise militar. "
-                    f"Aprovação em {state.indicators['approval']:.0f}% e coalizão em "
-                    f"{state.congress.coalition_support:.0f}% não sustentam uma aventura dessas. "
-                    f"Espaço fiscal: R$ {state.budget.fiscal_space_brl_bi:.1f} bi; capital político: "
-                    f"{state.indicators['political_capital']:.0f}. Recue e use o Congresso."
+                    f"Aprovação em {br_num(state.indicators['approval'], 0)}% e coalizão em "
+                    f"{br_num(state.congress.coalition_support, 0)}% não sustentam uma aventura dessas. "
+                    f"Espaço fiscal: R$ {br_num(state.budget.fiscal_space_brl_bi, 1)} bi; capital político: "
+                    f"{br_num(state.indicators['political_capital'], 0)}. Recue e use o Congresso."
                 ),
                 disagrees=True,
                 risk_level="crítico",
@@ -568,17 +582,18 @@ class MockProvider(LlmProvider):
             return AdvisorReply(
                 reply=(
                     "O gargalo hoje é político e fiscal ao mesmo tempo. Qualquer reforma larga consome "
-                    f"capital ({state.indicators['political_capital']:.0f}) e espaço (R$ "
-                    f"{state.budget.fiscal_space_brl_bi:.1f} bi). Negocie a base antes de gastar os dois."
+                    f"capital ({br_num(state.indicators['political_capital'], 0)}) e espaço (R$ "
+                    f"{br_num(state.budget.fiscal_space_brl_bi, 1)} bi). Negocie a base antes de gastar os dois."
                 ),
                 disagrees=False,
                 risk_level="moderado",
             )
         return AdvisorReply(
             reply=(
-                f"Em {state.date.label()} o governo tem aprovação de {state.indicators['approval']:.1f}% "
-                f"e coalizão de {state.congress.coalition_support:.0f}%. Inflação {state.indicators['inflation']:.1f}% "
-                f"e Selic {state.indicators['selic']:.2f}% limitam estímulo. Eu priorizaria uma agenda curta: "
+                f"Em {state.date.label()} o governo tem aprovação de {br_num(state.indicators['approval'], 1)}% "
+                f"e coalizão de {br_num(state.congress.coalition_support, 0)}%. "
+                f"Inflação {br_num(state.indicators['inflation'], 1)}% "
+                f"e Selic {br_num(state.indicators['selic'], 2)}% limitam estímulo. Eu priorizaria uma agenda curta: "
                 "base no Congresso, um gesto de infraestrutura com custo fiscal explícito, e evitar briga com o STF. "
                 "Se quiser, rodo um 'E se?' antes de confirmar a próxima ação."
             ),

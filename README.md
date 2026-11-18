@@ -13,6 +13,15 @@ Inspirado em jogos do tipo Pax Historia. Código em inglês; interface e textos 
 
 ## Instalação
 
+`make` é opcional. Sem ele:
+
+```bash
+cd my-pax-history
+./install.sh
+```
+
+Com Make:
+
 ```bash
 cd my-pax-history
 make install
@@ -21,10 +30,16 @@ make install
 ## Como jogar
 
 ```bash
-make dev
+./dev.sh
 ```
 
+ou `make dev`.
+
 Abra [http://127.0.0.1:5173](http://127.0.0.1:5173). Backend em `http://127.0.0.1:8000`.
+
+**Configurações** na tela inicial ou no jogo: provedor padrão, modelo Gemini, URL/modelo Ollama. A chave Gemini fica só neste computador (navegador + SQLite local).
+
+Se o globo WebGL não desenhar (GPU ausente, renderização por software, textura falha), o mapa SVG entra sozinho. Forçar: `http://127.0.0.1:5173/?globe=fallback`.
 
 Na nova partida:
 

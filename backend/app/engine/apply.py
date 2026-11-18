@@ -99,15 +99,16 @@ def push_history(
 
 
 def format_delta(key: str, delta: float) -> str:
+    from app.formatters import br_num
+
     label = INDICATOR_LABELS.get(key, key)
-    sign = "+" if delta >= 0 else ""
     if key in {"selic", "inflation", "unemployment", "gdp_growth", "poverty", "fiscal_primary_result"}:
-        return f"{label} {sign}{delta:.2f} p.p."
+        return f"{label} {br_num(delta, 2, signed=True)} p.p."
     if key in {"public_debt_gdp"}:
-        return f"{label} {sign}{delta:.2f} p.p. do PIB"
+        return f"{label} {br_num(delta, 2, signed=True)} p.p. do PIB"
     if key == "exchange_rate_usd":
-        return f"{label} {sign}{delta:.2f}"
-    return f"{label} {sign}{delta:.1f}"
+        return f"{label} {br_num(delta, 2, signed=True)}"
+    return f"{label} {br_num(delta, 1, signed=True)}"
 
 
 def sync_derived(state: GameState) -> None:

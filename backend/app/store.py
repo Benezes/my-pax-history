@@ -34,9 +34,10 @@ def init_db() -> None:
         connection.executescript(SCHEMA)
 
 
-def save_game(state: GameState, kind: str = "active") -> None:
+def save_game(state: GameState, kind: str = "active", list_name: str | None = None) -> None:
     state.updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     payload = state.model_dump_json()
+    display_name = list_name or state.name
     with _connect() as connection:
         connection.execute(
             """
@@ -48,7 +49,7 @@ def save_game(state: GameState, kind: str = "active") -> None:
                 updated_at = excluded.updated_at,
                 state_json = excluded.state_json
             """,
-            (state.id, kind, state.name, state.updated_at, payload),
+            (state.id, kind, display_name, state.updated_at, payload),
         )
 
 
@@ -77,11 +78,10 @@ def list_games(kind: str | None = None) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def snapshot(state: GameState, name: str) -> GameState:
+def snapshot(state: GameState, slot_name: str) -> GameState:
     clone = state.model_copy(deep=True)
     clone.id = state.id + "-save-" + datetime.now(timezone.utc).strftime("%H%M%S") + clone.id[:4]
-    clone.name = name
-    save_game(clone, kind="save")
+    save_game(clone, kind="save", list_name=slot_name)
     return clone
 
 
@@ -109,4 +109,5 @@ def settings_public(raw: dict[str, str], env_key_present: bool) -> dict:
         "gemini_model": raw.get("gemini_model") or "gemini-2.0-flash",
         "ollama_base_url": raw.get("ollama_base_url") or "http://127.0.0.1:11434",
         "ollama_model": raw.get("ollama_model") or "llama3.2",
+        "default_provider": raw.get("default_provider") or "mock",
     }
