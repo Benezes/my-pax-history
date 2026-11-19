@@ -1,46 +1,72 @@
 from __future__ import annotations
 
+import math
 from random import Random
 
-from app.constants import DIFFICULTY_PARAMS
+from app.constants import (
+    DIFFICULTY_PARAMS,
+    HOUSE_PASS_STEEPNESS,
+    INDEPENDENT_SWING,
+    MAJORITY_THRESHOLD,
+    ORDINARY_YES_RATES,
+    PEC_MARKERS,
+    PEC_THRESHOLD,
+    PEC_YES_RATES,
+)
 from app.engine.mandate import MandateAssessment, mandate_pass_delta
 from app.formatters import br_num
-from app.models import ActionProposal, GameState, Party
+from app.models import ActionProposal, Chamber, GameState
 
 
-def party_yes_probability(party: Party, proposal: ActionProposal, state: GameState) -> float:
-    base = 0.5 + party.stance / 200.0
-    if party.bloc == "government":
-        base += 0.22
-    elif party.bloc == "allied":
-        base += 0.08
-    elif party.bloc == "opposition":
-        base -= 0.18
-    approval = state.indicators["approval"]
-    base += (approval - 50.0) / 400.0
-    if proposal.category in {"fiscal", "institutional"} and party.bloc == "opposition":
-        base -= 0.08
-    if proposal.category == "social" and party.bloc == "opposition":
-        base -= 0.04
-    discipline = party.discipline / 100.0
-    aligned = 0.5 + party.stance / 200.0
-    return max(0.04, min(0.96, base * (0.35 + 0.65 * discipline) + aligned * 0.1))
+def is_constitutional_amendment(proposal: ActionProposal | None, raw_text: str = "") -> bool:
+    if proposal is not None and proposal.constitutional_amendment:
+        return True
+    parts = [raw_text or ""]
+    if proposal is not None:
+        parts.extend([proposal.title, proposal.summary, " ".join(proposal.tags)])
+    blob = " ".join(parts).lower()
+    padded = f" {blob} "
+    return any(marker in padded or marker in blob for marker in PEC_MARKERS)
+
+
+def stamp_amendment(proposal: ActionProposal, raw_text: str = "") -> ActionProposal:
+    if is_constitutional_amendment(proposal, raw_text):
+        proposal.constitutional_amendment = True
+    return proposal
+
+
+def vote_threshold(proposal: ActionProposal | None, raw_text: str = "") -> float:
+    return PEC_THRESHOLD if is_constitutional_amendment(proposal, raw_text) else MAJORITY_THRESHOLD
+
+
+def _house_share(chamber: Chamber, pec: bool, approval: float) -> float:
+    rates = PEC_YES_RATES if pec else ORDINARY_YES_RATES
+    total = max(1, chamber.seats)
+    yes = (
+        chamber.government * rates["government"]
+        + chamber.allied * rates["allied"]
+        + chamber.independent * rates["independent"]
+        + chamber.opposition * rates["opposition"]
+    )
+    share = yes / total
+    share += (approval - 50.0) / 400.0
+    coalition = (chamber.government + chamber.allied) / total
+    independent = chamber.independent / total
+    floor = coalition * 0.84 if pec else coalition + independent * INDEPENDENT_SWING
+    return max(0.05, min(0.95, max(share, floor)))
 
 
 def projected_votes(state: GameState, proposal: ActionProposal) -> tuple[float, float]:
-    chamber_yes = 0.0
-    chamber_total = 0
-    senate_yes = 0.0
-    senate_total = 0
-    for party in state.congress.parties:
-        p = party_yes_probability(party, proposal, state)
-        chamber_yes += party.chamber_seats * p
-        chamber_total += party.chamber_seats
-        senate_yes += party.senate_seats * p
-        senate_total += party.senate_seats
-    chamber_share = chamber_yes / max(1, chamber_total)
-    senate_share = senate_yes / max(1, senate_total)
-    return chamber_share, senate_share
+    pec = is_constitutional_amendment(proposal)
+    approval = state.indicators.get("approval", 50.0)
+    return (
+        _house_share(state.congress.chamber, pec, approval),
+        _house_share(state.congress.senate, pec, approval),
+    )
+
+
+def house_pass_probability(share: float, threshold: float) -> float:
+    return 1.0 / (1.0 + math.exp(-HOUSE_PASS_STEEPNESS * (share - threshold)))
 
 
 def pass_chance(
@@ -48,23 +74,70 @@ def pass_chance(
 ) -> float:
     if not proposal.requires_congress:
         return 1.0
+    pec = is_constitutional_amendment(proposal)
+    threshold = PEC_THRESHOLD if pec else MAJORITY_THRESHOLD
     chamber, senate = projected_votes(state, proposal)
-    coalition = state.congress.coalition_support / 100.0
-    relation = state.branches.get("executive_legislative", 50) / 100.0
     difficulty = DIFFICULTY_PARAMS[state.difficulty]
+    relation = state.branches.get("executive_legislative", 50) / 100.0
     raw = (
-        chamber * 0.45
-        + senate * 0.25
-        + coalition * 0.2
-        + relation * 0.1
-        - proposal.congress_difficulty / 280.0
+        house_pass_probability(chamber, threshold) * 0.52
+        + house_pass_probability(senate, threshold) * 0.38
+        + relation * 0.10
         - difficulty["pass_threshold_penalty"] / 100.0
         - difficulty["opposition_block_bonus"] / 200.0
     )
-    raw += {"medio": 0.18, "dificil": 0.07, "impossivel": 0.0}[state.difficulty]
+    if not pec and chamber >= MAJORITY_THRESHOLD and senate >= MAJORITY_THRESHOLD:
+        raw += 0.02
     if mandate is not None:
         raw += mandate_pass_delta(mandate)
     return max(0.05, min(0.95, raw))
+
+
+def _rejection_flavor(
+    proposal: ActionProposal,
+    chamber: float,
+    senate: float,
+    threshold: float,
+    pec: bool,
+    state: GameState,
+) -> str:
+    coalition = state.congress.coalition_support / 100.0
+    title = (proposal.title or "a medida").strip()
+    short = title if len(title) < 56 else title[:53] + "…"
+    if pec:
+        missing: list[str] = []
+        if chamber < threshold:
+            missing.append(
+                f"na Câmara ({br_num(chamber * 100, 0)}%, precisava de {br_num(threshold * 100, 0)}%)"
+            )
+        if senate < threshold:
+            missing.append(
+                f"no Senado ({br_num(senate * 100, 0)}%, precisava de {br_num(threshold * 100, 0)}%)"
+            )
+        where = " e ".join(missing) if missing else "nas duas Casas"
+        return (
+            f"«{short}» é PEC e exige três quintos (3/5) nas duas Casas. "
+            f"Faltaram votos {where}."
+        )
+    if chamber < threshold and senate >= threshold:
+        return (
+            f"«{short}» caiu na Câmara ({br_num(chamber * 100, 0)}% a favor, "
+            f"maioria simples exigida). O Senado projetava {br_num(senate * 100, 0)}%."
+        )
+    if senate < threshold and chamber >= threshold:
+        return (
+            f"«{short}» passou da Câmara na projeção, mas o Senado não fechou "
+            f"({br_num(senate * 100, 0)}% a favor)."
+        )
+    if coalition >= 0.5:
+        return (
+            f"Mesmo com base majoritária, independentes e parte da base não fecharam com "
+            f"«{short}» (Câmara {br_num(chamber * 100, 0)}%, Senado {br_num(senate * 100, 0)}%)."
+        )
+    return (
+        f"A base minoritária não reuniu maioria simples para «{short}» "
+        f"(Câmara {br_num(chamber * 100, 0)}%, Senado {br_num(senate * 100, 0)}%)."
+    )
 
 
 def roll_vote(
@@ -78,15 +151,33 @@ def roll_vote(
         return True, "Medida de competência privativa do Executivo.", chance
     passed = rng.random() < chance
     chamber, senate = projected_votes(state, proposal)
+    pec = is_constitutional_amendment(proposal)
+    threshold = PEC_THRESHOLD if pec else MAJORITY_THRESHOLD
+    quorum = (
+        "quórum de três quintos (3/5) nas duas Casas"
+        if pec
+        else "maioria simples nas duas Casas"
+    )
     if passed:
         reason = (
-            f"Aprovado no Congresso (probabilidade {br_num(chance * 100, 0)}%; "
+            f"Aprovada no Congresso ({quorum}; probabilidade {br_num(chance * 100, 0)}%; "
             f"projeção Câmara {br_num(chamber * 100, 0)}%, Senado {br_num(senate * 100, 0)}%)."
         )
     else:
         reason = (
-            f"Rejeitado no Congresso (probabilidade {br_num(chance * 100, 0)}%; "
+            f"Rejeitada no Congresso (probabilidade {br_num(chance * 100, 0)}%; "
             f"projeção Câmara {br_num(chamber * 100, 0)}%, Senado {br_num(senate * 100, 0)}%). "
-            f"A oposição e o centrão exploraram a fragilidade da base."
+            + _rejection_flavor(proposal, chamber, senate, threshold, pec, state)
         )
     return passed, reason, chance
+
+
+def sync_congress_to_support(state: GameState) -> None:
+    from app.engine.election import _shift_chamber, _sync_parties
+
+    share = state.congress.coalition_support / 100.0
+    chamber = _shift_chamber(state.congress.chamber, share, 0.0, 0.32, 0.64)
+    senate = _shift_chamber(state.congress.senate, share, 0.0, 0.30, 0.62)
+    state.congress.chamber = chamber
+    state.congress.senate = senate
+    state.congress.parties = _sync_parties(state.congress.parties, chamber, senate)

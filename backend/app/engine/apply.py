@@ -38,6 +38,9 @@ def set_value(state: GameState, key: str, value: float) -> None:
         bounds = INDICATOR_BOUNDS["coalition_support"]
         state.congress.coalition_support = clamp(value, *bounds)
         state.indicators["coalition_support"] = state.congress.coalition_support
+        from app.engine.congress import sync_congress_to_support
+
+        sync_congress_to_support(state)
         return
     if key in state.branches:
         bounds = INDICATOR_BOUNDS.get(key, (0.0, 100.0))
@@ -112,7 +115,10 @@ def format_delta(key: str, delta: float) -> str:
 
 
 def sync_derived(state: GameState) -> None:
+    from app.engine.congress import sync_congress_to_support
+
     state.indicators["coalition_support"] = state.congress.coalition_support
+    sync_congress_to_support(state)
     approval = state.indicators["approval"]
     for region in REGIONS:
         current = state.approval_breakdown.regions.get(region, approval)
@@ -181,6 +187,12 @@ def apply_macro(state: GameState, rng) -> dict[str, float]:
     if state.indicators["unemployment"] > 9:
         deltas["poverty"] = 0.12
         deltas["approval"] = deltas.get("approval", 0.0) - 0.2
+    media = state.indicators.get("media_climate", 50.0)
+    if media < 42:
+        deltas["approval"] = deltas.get("approval", 0.0) - 0.25
+    elif media > 60:
+        deltas["approval"] = deltas.get("approval", 0.0) + 0.12
+    deltas["approval"] = deltas.get("approval", 0.0) + rng.uniform(-0.18, 0.18)
     noise_keys = list(deltas.keys())
     for key in noise_keys:
         deltas[key] += rng.uniform(-0.02, 0.02)

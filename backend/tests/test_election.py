@@ -10,8 +10,11 @@ from app.constants import (
     COALITION_SENATE_MAX,
     COALITION_SENATE_MIN,
     MANDATE_YEAR_DECAY,
+    PEC_THRESHOLD,
     REJECTION_CAPITAL_REFUND,
 )
+from app.engine.apply import apply_delta
+from app.engine.congress import pass_chance, projected_votes, roll_vote, vote_threshold
 from app.engine.costs import compute_cost
 from app.engine.election import compose_congress, inaugurate, simulate_election, validate_proposals
 from app.engine.mandate import assess_mandate, year_decay
@@ -238,6 +241,134 @@ class ElectionEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(loaded.campaign)
         self.assertFalse(loaded.campaign_pending)
         self.assertEqual(loaded.status, "playing")
+
+    def test_honeymoon_majority_aligned_ordinary_bill_usually_passes(self):
+        state = create_new_game("medio", "mock")
+        result = simulate_election(PROPOSALS, _hints(3, 0.9, 0.9), seed=11, difficulty="medio")
+        inaugurate(state, result)
+        chamber_base = (
+            state.congress.chamber.government + state.congress.chamber.allied
+        ) / state.congress.chamber.seats
+        senate_base = (
+            state.congress.senate.government + state.congress.senate.allied
+        ) / state.congress.senate.seats
+        self.assertGreaterEqual(chamber_base, 0.5)
+        proposal = ActionProposal(
+            title="Reforma tributária",
+            summary="Unificar tributos",
+            category="fiscal",
+            scope="medium",
+            requires_congress=True,
+            congress_difficulty=42,
+        )
+        text = "Proponho uma reforma tributária ampla, unificando PIS, Cofins e ICMS."
+        mandate = assess_mandate(state, text, proposal)
+        self.assertTrue(mandate.applied)
+        self.assertGreaterEqual(mandate.capital_cut, 0.20)
+        self.assertLessEqual(mandate.capital_cut, 0.35)
+        self.assertGreaterEqual(mandate.pass_boost, 0.10)
+        self.assertLessEqual(mandate.pass_boost, 0.20)
+        chamber, senate = projected_votes(state, proposal)
+        self.assertGreaterEqual(chamber + 1e-9, chamber_base)
+        self.assertGreaterEqual(senate + 1e-9, senate_base)
+        chance = pass_chance(state, proposal, mandate)
+        self.assertGreaterEqual(chance, 0.70)
+        self.assertLessEqual(chance, 0.90)
+
+    def test_pec_uses_three_fifths_quorum(self):
+        state = create_new_game("medio", "mock")
+        result = simulate_election(PROPOSALS, _hints(3, 0.85, 0.85), seed=8, difficulty="medio")
+        inaugurate(state, result)
+        proposal = ActionProposal(
+            title="PEC da reeleição indefinida",
+            summary="Alterar a Constituição",
+            category="institutional",
+            scope="large",
+            requires_congress=True,
+            congress_difficulty=72,
+            constitutional_amendment=True,
+        )
+        self.assertAlmostEqual(vote_threshold(proposal, proposal.title), PEC_THRESHOLD)
+        class FailRng:
+            def random(self) -> float:
+                return 0.99
+
+        passed, reason, chance = roll_vote(state, proposal, FailRng())
+        self.assertFalse(passed)
+        self.assertIn("três quintos", reason.lower())
+        self.assertIn("rejeitada", reason.lower())
+        self.assertNotIn("exploraram a fragilidade da base", reason.lower())
+        self.assertLess(chance, 0.55)
+
+    def test_projections_and_seats_follow_coalition(self):
+        state = create_new_game("medio", "mock")
+        result = simulate_election(PROPOSALS, _hints(3, 0.88, 0.88), seed=5, difficulty="medio")
+        inaugurate(state, result)
+        before = state.congress.chamber.government + state.congress.chamber.allied
+        proposal = ActionProposal(
+            title="Projeto ordinário",
+            summary="Lei comum",
+            category="fiscal",
+            scope="medium",
+            requires_congress=True,
+        )
+        chamber_high, _ = projected_votes(state, proposal)
+        apply_delta(state, "coalition_support", -12.0, 1.0)
+        after = state.congress.chamber.government + state.congress.chamber.allied
+        self.assertLess(after, before)
+        self.assertAlmostEqual(
+            after / state.congress.chamber.seats,
+            state.congress.coalition_support / 100.0,
+            delta=0.03,
+        )
+        chamber_low, _ = projected_votes(state, proposal)
+        self.assertLess(chamber_low, chamber_high)
+
+    def test_ordinary_capital_is_modest_and_pec_costs_more(self):
+        state = create_new_game("medio", "mock")
+        ordinary = ActionProposal(
+            title="Isenção do IR",
+            summary="Faixa de isenção",
+            category="fiscal",
+            scope="medium",
+            requires_congress=True,
+            congress_difficulty=42,
+        )
+        pec = ActionProposal(
+            title="PEC da reeleição indefinida",
+            summary="Mudar a Constituição",
+            category="institutional",
+            scope="large",
+            requires_congress=True,
+            congress_difficulty=72,
+            constitutional_amendment=True,
+        )
+        ordinary_cost = compute_cost(state, ordinary, "Isenção do imposto de renda até R$ 5 mil.")
+        pec_cost = compute_cost(state, pec, "Enviar PEC da reeleição indefinida ao Congresso.")
+        self.assertGreaterEqual(ordinary_cost.political, 8.0)
+        self.assertLessEqual(ordinary_cost.political, 20.0)
+        self.assertGreater(pec_cost.political, ordinary_cost.political)
+
+    def test_rejection_lowers_approval(self):
+        state = create_new_game("medio", "mock")
+        before = state.indicators["approval"]
+        proposal = ActionProposal(
+            title="Reforma dura",
+            summary="Texto",
+            category="fiscal",
+            scope="medium",
+            requires_congress=True,
+            congress_difficulty=90,
+        )
+
+        class FailRng:
+            def random(self) -> float:
+                return 0.99
+
+        resolved = _apply_proposal(state, proposal, "Projeto de lei ordinária no Congresso.", FailRng())
+        self.assertEqual(resolved.execution, "rejected")
+        self.assertLess(state.indicators["approval"], before)
+        self.assertIn("rejeitada", resolved.reason.lower())
 
     async def test_mock_classifies_campaign_offline(self):
         classified = await MockProvider().classify_campaign(PROPOSALS)

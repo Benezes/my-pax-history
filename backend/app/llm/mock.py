@@ -41,12 +41,42 @@ class PolicyPattern:
 
 POLICIES = (
     PolicyPattern(
+        keywords=(
+            "isenção de ir",
+            "isencao de ir",
+            "isenção do ir",
+            "isencao do ir",
+            "imposto de renda até",
+            "imposto de renda ate",
+            "ir até r$",
+            "ir ate r$",
+            "faixa de isenção",
+            "faixa de isencao",
+            "cinco mil",
+        ),
+        title="Isenção do Imposto de Renda",
+        category="fiscal",
+        scope="medium",
+        requires_congress=True,
+        congress_difficulty=42,
+        effects=(
+            ("approval", 2.4, 1),
+            ("poverty", -0.15, 4),
+            ("fiscal_primary_result", -0.18, 0),
+        ),
+        agents={"sociedade_civil": 6, "sindicatos": 4, "empresariado": -2, "congresso": -3},
+        countries=("BRA",),
+        risks=("Centrão cobra compensação", "Receita pressiona a LDO"),
+        timing="Aprovação em cerca de 1 mês; efeito fiscal imediato.",
+        summary="Projeto ordinário de isenção do IR até R$ 5 mil.",
+    ),
+    PolicyPattern(
         keywords=("reforma tributária", "reforma tributaria", "iva", "imposto", "tribut"),
         title="Reforma tributária",
         category="fiscal",
-        scope="large",
+        scope="medium",
         requires_congress=True,
-        congress_difficulty=58,
+        congress_difficulty=44,
         effects=(
             ("approval", -3.2, 0),
             ("gdp_growth", 0.28, 10),
@@ -359,6 +389,7 @@ def _proposal_from_policy(policy: PolicyPattern, text: str) -> ActionProposal:
         tags=list(policy.keywords[:3]),
         risks=list(policy.risks),
         timing_note=policy.timing,
+        constitutional_amendment="pec" in policy.title.lower() or "pec" in lowered,
     )
 
 
@@ -396,6 +427,7 @@ def _generic(text: str) -> ActionProposal:
         affected_countries=["BRA"],
         risks=["Ruptura institucional"] if risky else ["Execução burocrática lenta"],
         timing_note="Reação política no curto prazo.",
+        constitutional_amendment="pec" in text.lower() or "emenda constitucional" in text.lower(),
     )
 
 

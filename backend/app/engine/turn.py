@@ -19,7 +19,7 @@ from app.engine.apply import (
     schedule,
     sync_derived,
 )
-from app.engine.congress import roll_vote
+from app.engine.congress import roll_vote, stamp_amendment
 from app.engine.costs import compute_cost, spend, verdict
 from app.engine.mandate import assess_mandate, unconstitutional_reason
 from app.engine.loss import evaluate_loss
@@ -164,6 +164,7 @@ def _apply_proposal(
             mandate_applied=False,
             limit_kind="budget",
         )
+    stamp_amendment(proposal, raw_text)
     spend(state, resource)
     passed, vote_reason, _chance = roll_vote(state, proposal, rng, mandate)
     if mandate.applied:
@@ -181,6 +182,7 @@ def _apply_proposal(
         apply_delta(state, "political_capital", -2.5, 1.0)
         apply_delta(state, "coalition_support", -1.8, p["consequence_intensity"])
         apply_delta(state, "media_climate", -2.0, 1.0)
+        apply_delta(state, "approval", -1.5, p["consequence_intensity"])
         refund_note = (
             f" O Congresso rejeitou a medida; o espaço fiscal não foi empenhado. "
             f"Foram devolvidos {br_num(refund, 1)} de capital político "
@@ -384,7 +386,8 @@ def _fallback_report(state: GameState, resolved: list[ResolvedAction]) -> Report
             f"Selic em {br_num(state.indicators['selic'], 2)}%, inflação {br_num(state.indicators['inflation'], 2)}%, "
             f"PIB {br_num(state.indicators['gdp_growth'], 2, signed=True)}%, "
             f"dívida {br_num(state.indicators['public_debt_gdp'], 1)}% do PIB. "
-            f"Espaço fiscal: R$ {br_num(state.budget.fiscal_space_brl_bi, 1)} bi."
+            f"Espaço fiscal: R$ {br_num(state.budget.fiscal_space_brl_bi, 1)} bi "
+            f"(a arrecadação recompôs cerca de R$ {br_num(state.budget.monthly_replenish_brl_bi, 1)} bi neste mês)."
         ),
         politica=(
             f"Apoio da coalizão em {br_num(state.congress.coalition_support, 0)}%. "
@@ -395,7 +398,14 @@ def _fallback_report(state: GameState, resolved: list[ResolvedAction]) -> Report
             f"Índice de criminalidade em {br_num(state.indicators['crime_index'], 0)}. "
             f"Estabilidade institucional: {br_num(state.indicators['institutional_stability'], 0)}."
         ),
-        aprovacao=f"Aprovação presidencial em {br_num(state.indicators['approval'], 1)}%.",
+        aprovacao=(
+            f"Aprovação presidencial em {br_num(state.indicators['approval'], 1)}%."
+            + (
+                " Derrotas no Congresso desgastam a popularidade."
+                if rejected
+                else ""
+            )
+        ),
         relacoes_internacionais=(
             "Relações: "
             + ", ".join(

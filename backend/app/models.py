@@ -201,6 +201,7 @@ class ActionProposal(BaseModel):
     mandate_hint_index: int | None = None
     mandate_hint_score: float = 0.0
     contradicts_campaign: bool = False
+    constitutional_amendment: bool = False
 
 
 class ActionInterpretation(BaseModel):
@@ -506,6 +507,10 @@ class WhatIfRequest(BaseModel):
 
 class CampaignRequest(BaseModel):
     proposals: list[str]
+
+
+class CostPreviewRequest(BaseModel):
+    text: str = Field(min_length=3, max_length=12000)
 
 
 class SaveRequest(BaseModel):

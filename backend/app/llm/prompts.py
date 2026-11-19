@@ -20,7 +20,8 @@ Responda SOMENTE um JSON válido, sem markdown, com este formato:
         "affected_countries": ["BRA"],
         "tags": ["exemplo"],
         "risks": ["risco em português"],
-        "timing_note": "quando os efeitos aparecem"
+        "timing_note": "quando os efeitos aparecem",
+        "constitutional_amendment": false
       }
     ],
     "advisor_warning": "string ou null"
@@ -68,6 +69,7 @@ NUNCA envie valores absolutos de indicadores. Apenas deltas modestos.
 O motor calcula custos fiscais e de capital político; você só estima o escopo.
 Se houver mandato das urnas, preencha mandate_hint_index (0-based) e mandate_hint_score (0 a 1)
 quando a ação entregar uma proposta de campanha. contradicts_campaign=true se a ação desmente a campanha.
+constitutional_amendment=true se for PEC, emenda constitucional ou mudança da Constituição (quórum de 3/5).
 """.strip()
 
 

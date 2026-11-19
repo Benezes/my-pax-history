@@ -209,6 +209,14 @@ export interface Game {
   campaign?: CampaignResult | null;
 }
 
+export interface CostPreview {
+  political_cost: number;
+  fiscal_cost_brl_bi: number;
+  mandate_applied: boolean;
+  constitutional_amendment: boolean;
+  note: string;
+}
+
 export interface SaveRow {
   id: string;
   kind: string;

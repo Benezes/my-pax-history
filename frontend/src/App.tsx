@@ -5,7 +5,21 @@ import CampaignScreen from "./components/CampaignScreen";
 import GlobeView from "./components/GlobeView";
 import PendingAction from "./components/PendingAction";
 import { ACTION_MAX, ACTION_MIN, ADVISOR_MAX } from "./limits";
-import type { Game, MetaResponse, SaveRow, View, WhatIfResult } from "./types";
+import type { CostPreview, Game, MetaResponse, SaveRow, View, WhatIfResult } from "./types";
+
+const ACTION_TYPE_PT: Record<string, string> = {
+  support: "apoio",
+  oppose: "oposição",
+  bargain: "negociação",
+  mobilize: "mobilização",
+  investigate: "investigação",
+  neutral: "neutro",
+};
+
+function monthsLabel(count: number) {
+  const n = Math.max(0, Math.round(count));
+  return n === 1 ? "em 1 mês" : `em ${n} meses`;
+}
 
 const GEMINI_KEY_STORAGE = "presidencia.geminiApiKey";
 
@@ -395,11 +409,24 @@ function GameScreen({
   const [whatIf, setWhatIf] = useState<WhatIfResult | null>(null);
   const [advice, setAdvice] = useState("");
   const [saveName, setSaveName] = useState("Arquivo 1");
+  const [costPreview, setCostPreview] = useState<CostPreview | null>(null);
   const [aiJob, setAiJob] = useState<{ kind: AiKind; months: number } | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [stepIndex, setStepIndex] = useState(0);
   const over = game.status !== "playing";
   const aiBusy = Boolean(aiJob);
+
+  useEffect(() => {
+    const text = draft.trim();
+    if (text.length < ACTION_MIN || over) {
+      setCostPreview(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      api.costPreview(game.id, text).then(setCostPreview).catch(() => setCostPreview(null));
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [draft, game.id, over]);
 
   useEffect(() => {
     const apply = () => {
@@ -804,43 +831,54 @@ function GameScreen({
         </aside>
       </div>
       <div className="dock">
-        <div className="dock-head">
-          <div className="kicker">Campo de ações</div>
-          <span className={`counter ${overLimit ? "over" : ""}`}>
-            {draft.length.toLocaleString("pt-BR")} / {ACTION_MAX.toLocaleString("pt-BR")}
-          </span>
-        </div>
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          maxLength={ACTION_MAX + 200}
-          placeholder="Ex.: Propor uma reforma tributária gradual e negociar a base do centrão com emendas de infraestrutura no Nordeste."
-        />
-        {game.pending_actions.length > 0 && (
-          <div className="pending">
-            {game.pending_actions.map((item) => (
-              <PendingAction key={item.id} text={item.text} />
-            ))}
-          </div>
-        )}
-        {aiJob && (aiJob.kind !== "advisor" || tab !== "advisor") && (
-          <BusyStatus kind={aiJob.kind} months={aiJob.months} elapsed={elapsed} stepIndex={stepIndex} />
-        )}
-        <div className="row dock-actions">
-          <button className="btn" disabled={busy || aiBusy || tooShort || overLimit} onClick={askWhatIf}>
-            E se?
-          </button>
-          <button className="btn primary" disabled={busy || aiBusy || tooShort || overLimit} onClick={confirmAction}>
-            Registrar ação
-          </button>
-          <button className="btn" disabled={busy || aiBusy} onClick={() => advance(1)}>
-            Avançar 1 mês
-          </button>
-          <button className="btn" disabled={busy || aiBusy} onClick={() => advance(3)}>
-            Avançar 3 meses
-          </button>
-        </div>
         {whatIf && <WhatIfPanel result={whatIf} onConfirm={confirmAction} onClose={() => setWhatIf(null)} />}
+        <div className="dock-main">
+          <div className="dock-head">
+            <div className="kicker">Campo de ações</div>
+            <span className={`counter ${overLimit ? "over" : ""}`}>
+              {draft.length.toLocaleString("pt-BR")} / {ACTION_MAX.toLocaleString("pt-BR")}
+            </span>
+          </div>
+          <div className="dock-body">
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              maxLength={ACTION_MAX + 200}
+              placeholder="Ex.: Propor uma reforma tributária gradual e negociar a base do centrão com emendas de infraestrutura no Nordeste."
+            />
+            {costPreview && !tooShort && (
+              <p className="cost-preview">
+                Estimativa: cerca de <b>{NUM(costPreview.political_cost, 0)} de capital político</b>
+                {costPreview.mandate_applied ? " · mandato das urnas" : ""}
+                {costPreview.constitutional_amendment ? " · PEC (3/5)" : ""}
+              </p>
+            )}
+            {game.pending_actions.length > 0 && (
+              <div className="pending">
+                {game.pending_actions.map((item) => (
+                  <PendingAction key={item.id} text={item.text} />
+                ))}
+              </div>
+            )}
+            {aiJob && (aiJob.kind !== "advisor" || tab !== "advisor") && (
+              <BusyStatus kind={aiJob.kind} months={aiJob.months} elapsed={elapsed} stepIndex={stepIndex} />
+            )}
+          </div>
+          <div className="row dock-actions">
+            <button className="btn" disabled={busy || aiBusy || tooShort || overLimit} onClick={askWhatIf}>
+              E se?
+            </button>
+            <button className="btn primary" disabled={busy || aiBusy || tooShort || overLimit} onClick={confirmAction}>
+              Registrar ação
+            </button>
+            <button className="btn" disabled={busy || aiBusy} onClick={() => advance(1)}>
+              Avançar 1 mês
+            </button>
+            <button className="btn" disabled={busy || aiBusy} onClick={() => advance(3)}>
+              Avançar 3 meses
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1002,6 +1040,7 @@ function WhatIfPanel({
 }) {
   return (
     <div className="whatif">
+      <div className="whatif-body">
       <div className="kicker">E se?</div>
       <ModelNote name={result.answered_by} />
       <h3>{result.title}</h3>
@@ -1033,7 +1072,7 @@ function WhatIfPanel({
             <li key={item.indicator}>
               {item.label}: {item.immediate_delta ? `${item.immediate_delta > 0 ? "+" : ""}${NUM(item.immediate_delta)} agora` : ""}
               {item.delayed_delta
-                ? ` ${item.delayed_delta > 0 ? "+" : ""}${NUM(item.delayed_delta)} em ${item.delay_months} mês(es)`
+                ? ` ${item.delayed_delta > 0 ? "+" : ""}${NUM(item.delayed_delta)} ${monthsLabel(item.delay_months)}`
                 : ""}
             </li>
           ))}
@@ -1043,14 +1082,17 @@ function WhatIfPanel({
         <ul>
           {result.agent_reactions.map((item) => (
             <li key={item.agent_id}>
-              {item.name} ({item.action_type}) {item.statement}
+              {item.name} ({ACTION_TYPE_PT[item.action_type] || item.action_type}) {item.statement}
             </li>
           ))}
         </ul>
       )}
       {result.risks.length > 0 && <p>Riscos: {result.risks.join("; ")}.</p>}
-      <p className={result.disagrees ? "banner" : ""}>{result.advisor_commentary}</p>
-      <div className="row" style={{ justifyContent: "flex-start" }}>
+      {result.advisor_commentary ? (
+        <p className={result.disagrees ? "banner" : ""}>{result.advisor_commentary}</p>
+      ) : null}
+      </div>
+      <div className="row whatif-actions">
         <button className="btn primary" onClick={onConfirm}>
           {result.execution === "blocked" ? "Registrar mesmo assim" : "Confirmar ação"}
         </button>

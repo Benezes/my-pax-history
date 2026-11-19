@@ -188,28 +188,60 @@ DIFFICULTY_PARAMS = {
 SCOPE_ORDER = ("small", "medium", "large", "massive")
 
 FISCAL_COST_BRL_BI: dict[str, tuple[float, float, float, float]] = {
-    "fiscal": (5.0, 16.0, 36.0, 70.0),
-    "infra": (12.0, 30.0, 65.0, 115.0),
-    "social": (8.0, 24.0, 50.0, 88.0),
-    "security": (5.0, 16.0, 38.0, 62.0),
+    "fiscal": (4.0, 12.0, 28.0, 58.0),
+    "infra": (10.0, 24.0, 52.0, 95.0),
+    "social": (6.0, 18.0, 40.0, 72.0),
+    "security": (4.0, 14.0, 32.0, 54.0),
     "monetary": (0.0, 0.0, 1.0, 3.0),
     "diplomacy": (0.4, 1.8, 7.0, 18.0),
     "political": (0.0, 0.8, 2.5, 6.0),
     "institutional": (0.2, 1.2, 5.0, 12.0),
-    "other": (1.5, 8.0, 20.0, 40.0),
+    "other": (1.2, 6.0, 16.0, 32.0),
 }
 
 POLITICAL_COST: dict[str, tuple[float, float, float, float]] = {
-    "fiscal": (8.0, 15.0, 26.0, 38.0),
-    "infra": (6.0, 12.0, 20.0, 30.0),
-    "social": (7.0, 14.0, 24.0, 34.0),
-    "security": (6.0, 13.0, 22.0, 32.0),
-    "monetary": (10.0, 18.0, 28.0, 36.0),
-    "diplomacy": (5.0, 10.0, 18.0, 28.0),
-    "political": (9.0, 16.0, 27.0, 40.0),
-    "institutional": (11.0, 20.0, 32.0, 45.0),
-    "other": (6.0, 12.0, 20.0, 30.0),
+    "fiscal": (5.0, 9.0, 14.0, 22.0),
+    "infra": (4.0, 8.0, 13.0, 20.0),
+    "social": (5.0, 9.0, 14.0, 21.0),
+    "security": (5.0, 9.0, 13.0, 20.0),
+    "monetary": (6.0, 10.0, 16.0, 24.0),
+    "diplomacy": (4.0, 7.0, 12.0, 18.0),
+    "political": (6.0, 10.0, 16.0, 24.0),
+    "institutional": (6.0, 11.0, 16.0, 24.0),
+    "other": (4.0, 8.0, 13.0, 20.0),
 }
+
+CONGRESS_POLITICAL_ADD = 2.0
+PEC_POLITICAL_SURCHARGE = 12.0
+ORDINARY_BILL_CAPITAL_MAX = 20.0
+MAJORITY_THRESHOLD = 0.5
+PEC_THRESHOLD = 0.6
+INDEPENDENT_SWING = 0.28
+ORDINARY_YES_RATES = {
+    "government": 0.93,
+    "allied": 0.82,
+    "independent": 0.38,
+    "opposition": 0.11,
+}
+PEC_YES_RATES = {
+    "government": 0.78,
+    "allied": 0.56,
+    "independent": 0.22,
+    "opposition": 0.05,
+}
+HOUSE_PASS_STEEPNESS = 12.0
+PEC_MARKERS = (
+    "pec ",
+    "pec da",
+    "pec do",
+    "pec de",
+    "emenda constitucional",
+    "reforma constitucional",
+    "alterar a constituição",
+    "alterar a constituicao",
+    "mudar a constituição",
+    "mudar a constituicao",
+)
 
 MINISTER_PORTFOLIOS = (
     "casa_civil",
@@ -330,9 +362,13 @@ SEATS_PER_PLATFORM_SENATE = 3.5
 MANDATE_MATCH_THRESHOLD = 0.22
 MANDATE_LLM_MIN_ENGINE = 0.12
 MANDATE_YEAR_DECAY = (1.0, 0.55, 0.28, 0.12)
-MANDATE_CAPITAL_REDUCTION = 0.35
-MANDATE_PASS_BONUS = 0.18
+MANDATE_CAPITAL_REDUCTION = 0.32
+MANDATE_PASS_BONUS = 0.16
 MANDATE_POPULARITY_FLOOR = 0.4
+MANDATE_YEAR1_CAPITAL_FLOOR = 0.20
+MANDATE_YEAR1_PASS_FLOOR = 0.10
+MANDATE_CAPITAL_CUT_MAX = 0.35
+MANDATE_PASS_BOOST_MAX = 0.20
 REJECTION_CAPITAL_REFUND = 0.5
 HONEYMOON_CAPITAL_BONUS = 6.0
 HONEYMOON_APPROVAL_PER_MARGIN_PP = 0.18

@@ -4,11 +4,15 @@ import re
 from dataclasses import dataclass
 
 from app.constants import (
+    MANDATE_CAPITAL_CUT_MAX,
     MANDATE_CAPITAL_REDUCTION,
     MANDATE_LLM_MIN_ENGINE,
     MANDATE_MATCH_THRESHOLD,
     MANDATE_PASS_BONUS,
+    MANDATE_PASS_BOOST_MAX,
     MANDATE_POPULARITY_FLOOR,
+    MANDATE_YEAR1_CAPITAL_FLOOR,
+    MANDATE_YEAR1_PASS_FLOOR,
     MANDATE_YEAR_DECAY,
     UNCONSTITUTIONAL_TOKENS,
 )
@@ -136,6 +140,8 @@ class MandateAssessment:
     match_score: float = 0.0
     year_factor: float = 1.0
     popularity_factor: float = 1.0
+    capital_cut: float = 0.0
+    pass_boost: float = 0.0
     note: str = ""
     contradict_reason: str = ""
     limit_kind: str = ""
@@ -196,9 +202,19 @@ def assess_mandate(state: GameState, raw_text: str, proposal: ActionProposal | N
         return MandateAssessment(matched=False, contradicts=False, bonus=0.0, match_score=best_score)
     year_factor = year_decay(state.months_elapsed)
     pop_factor = popularity_factor(state.indicators.get("approval", 50.0))
-    bonus = max(0.0, min(1.0, best_score * year_factor * pop_factor * (0.65 + best.weight)))
+    margin = 0.0
+    if campaign is not None:
+        margin = max(0.0, float(campaign.margin_pp))
+    margin_factor = max(0.75, min(1.15, 0.75 + margin / 40.0))
+    weight_term = 0.72 + 0.28 * max(0.0, min(1.0, best.weight))
+    bonus = max(0.0, min(1.0, year_factor * pop_factor * weight_term * margin_factor))
     capital_cut = MANDATE_CAPITAL_REDUCTION * bonus
     pass_boost = MANDATE_PASS_BONUS * bonus
+    if year_factor >= 0.99:
+        capital_cut = max(capital_cut, MANDATE_YEAR1_CAPITAL_FLOOR + 0.12 * best.weight)
+        pass_boost = max(pass_boost, MANDATE_YEAR1_PASS_FLOOR + 0.08 * best.weight)
+    capital_cut = max(0.0, min(MANDATE_CAPITAL_CUT_MAX, capital_cut))
+    pass_boost = max(0.0, min(MANDATE_PASS_BOOST_MAX, pass_boost))
     note = (
         f"Mandato das urnas: bônus aplicado na proposta «{best.text[:90]}» "
         f"(peso {br_num(best.weight * 100, 0)}%, fator do ano {br_num(year_factor * 100, 0)}%). "
@@ -214,6 +230,8 @@ def assess_mandate(state: GameState, raw_text: str, proposal: ActionProposal | N
         match_score=best_score,
         year_factor=year_factor,
         popularity_factor=pop_factor,
+        capital_cut=capital_cut,
+        pass_boost=pass_boost,
         note=note,
     )
 
@@ -221,10 +239,10 @@ def assess_mandate(state: GameState, raw_text: str, proposal: ActionProposal | N
 def mandate_cost_factor(assessment: MandateAssessment) -> float:
     if not assessment.applied:
         return 1.0
-    return max(0.45, 1.0 - MANDATE_CAPITAL_REDUCTION * assessment.bonus)
+    return max(0.65, 1.0 - assessment.capital_cut)
 
 
 def mandate_pass_delta(assessment: MandateAssessment) -> float:
     if not assessment.applied:
         return 0.0
-    return MANDATE_PASS_BONUS * assessment.bonus
+    return assessment.pass_boost

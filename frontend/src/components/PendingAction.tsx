@@ -1,14 +1,30 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function PendingAction({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
-  const long = text.length > 96;
+  const [truncated, setTruncated] = useState(false);
+  const ref = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || open) return;
+    const measure = () => setTruncated(el.scrollHeight > el.clientHeight + 2);
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(el);
+    return () => observer?.disconnect();
+  }, [text, open]);
+
   return (
     <article className={`queued ${open ? "open" : ""}`}>
-      <p className={open || !long ? "full" : "clamp"} title={long && !open ? text : undefined}>
+      <p
+        ref={ref}
+        className={open ? "full" : "clamp"}
+        title={truncated && !open ? text : undefined}
+      >
         {text}
       </p>
-      {long && (
+      {truncated && (
         <button
           type="button"
           className="linkish"

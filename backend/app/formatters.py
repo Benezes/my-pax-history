@@ -30,6 +30,13 @@ def agent_verb(agent_id: str, singular: str, plural: str) -> str:
     return plural if agent_id in PLURAL_AGENT_IDS else singular
 
 
+def months_pt(count: int) -> str:
+    n = max(0, int(count))
+    if n == 1:
+        return "em 1 mês"
+    return f"em {n} meses"
+
+
 def tidy_pt(text: str) -> str:
     cleaned = re.sub(r"\.{2,}", ".", text.strip())
     return cleaned.rstrip(".") + "." if cleaned else cleaned

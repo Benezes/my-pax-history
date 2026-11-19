@@ -16,6 +16,7 @@ from app.models import (
     AdvanceRequest,
     CampaignRequest,
     ChatMessage,
+    CostPreviewRequest,
     NewGameRequest,
     QueueActionRequest,
     SaveRequest,
@@ -135,6 +136,26 @@ async def run_campaign(game_id: str, body: CampaignRequest):
     inaugurate(state, result)
     save_game(state)
     return public_state(state)
+
+
+@router.post("/games/{game_id}/cost-preview")
+async def cost_preview(game_id: str, body: CostPreviewRequest):
+    state = _get(game_id)
+    from app.engine.costs import compute_cost, heuristic_proposal
+    from app.engine.congress import stamp_amendment
+    from app.engine.mandate import assess_mandate
+
+    proposal = heuristic_proposal(body.text)
+    stamp_amendment(proposal, body.text)
+    mandate = assess_mandate(state, body.text, proposal)
+    cost = compute_cost(state, proposal, body.text, mandate)
+    return {
+        "political_cost": cost.political,
+        "fiscal_cost_brl_bi": cost.fiscal_brl_bi,
+        "mandate_applied": mandate.applied,
+        "constitutional_amendment": proposal.constitutional_amendment,
+        "note": "Estimativa aproximada do motor, sem a IA.",
+    }
 
 
 @router.post("/games/{game_id}/actions")
