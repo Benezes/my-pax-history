@@ -393,6 +393,13 @@ def _proposal_from_policy(policy: PolicyPattern, text: str) -> ActionProposal:
     )
 
 
+def match_proposal(state: GameState, text: str) -> ActionProposal:
+    """Deterministic classification used by cost preview and the offline E se?."""
+    policy = _match(text)
+    proposal = _proposal_from_policy(policy, text) if policy else _generic(text)
+    return _with_mandate_hint(state, proposal, text)
+
+
 def _with_mandate_hint(state: GameState, proposal: ActionProposal, text: str) -> ActionProposal:
     campaign = state.campaign
     if campaign is None or not campaign.proposals:
@@ -624,9 +631,7 @@ class MockProvider(LlmProvider):
             text = raw.strip()
             if not text:
                 continue
-            policy = _match(text)
-            proposal = _proposal_from_policy(policy, text) if policy else _generic(text)
-            actions.append(_with_mandate_hint(state, proposal, text))
+            actions.append(match_proposal(state, text))
         proposal = actions[0] if actions else None
         warning = None
         joined = " ".join(texts).lower()

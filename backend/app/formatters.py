@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 PLURAL_AGENT_IDS = frozenset({"sindicatos", "governadores", "partidos", "forcas_armadas"})
 
 
+def round_half_up(value: float, digits: int = 0) -> float:
+    quant = Decimal("1").scaleb(-max(0, int(digits)))
+    return float(Decimal(str(value)).quantize(quant, rounding=ROUND_HALF_UP))
+
+
 def br_num(value: float, digits: int = 1, signed: bool = False) -> str:
-    rounded = round(float(value), digits)
+    rounded = round_half_up(float(value), digits)
     text = f"{rounded:.{digits}f}".replace(".", ",")
     if signed and rounded > 0:
         return "+" + text

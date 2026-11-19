@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
+from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
 import httpx
@@ -33,6 +35,7 @@ GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 RETRY_STATUSES = {429, 503}
 SKIP_STATUSES = {404}
 BACKOFF_SECONDS = (0.4, 0.9)
+_DURATION_RE = re.compile(r"^\s*([0-9]*\.?[0-9]+)\s*s?\s*$", re.IGNORECASE)
 
 
 def _headers(api_key: str) -> dict[str, str]:
@@ -96,6 +99,67 @@ async def list_gemini_models(api_key: str, client: httpx.AsyncClient | None = No
         if name:
             models.append(name)
     return models
+
+
+def _parse_duration_seconds(raw: Any) -> float | None:
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        return max(0.0, float(raw))
+    if isinstance(raw, dict):
+        seconds = raw.get("seconds")
+        if seconds is None:
+            return None
+        nanos = float(raw.get("nanos") or 0) / 1_000_000_000
+        try:
+            return max(0.0, float(seconds) + nanos)
+        except (TypeError, ValueError):
+            return None
+    match = _DURATION_RE.match(str(raw))
+    if not match:
+        return None
+    return max(0.0, float(match.group(1)))
+
+
+def retry_after_seconds(response: httpx.Response) -> float | None:
+    header = (response.headers.get("retry-after") or response.headers.get("Retry-After") or "").strip()
+    if header:
+        try:
+            return max(0.0, float(header))
+        except ValueError:
+            try:
+                when = parsedate_to_datetime(header)
+                return max(0.0, when.timestamp() - time.time())
+            except (TypeError, ValueError, OverflowError):
+                pass
+    try:
+        payload = response.json()
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+    details = error.get("details") or payload.get("details") or []
+    if isinstance(details, dict):
+        details = [details]
+    for item in details:
+        if not isinstance(item, dict):
+            continue
+        parsed = _parse_duration_seconds(item.get("retryDelay") or item.get("retry_delay"))
+        if parsed is not None:
+            return parsed
+    return _parse_duration_seconds(
+        error.get("retryDelay") or error.get("retry_delay") or payload.get("retryDelay")
+    )
+
+
+def retry_wait_seconds(response: httpx.Response, attempt: int) -> float:
+    parsed = retry_after_seconds(response)
+    if parsed is not None:
+        return parsed
+    if 0 <= attempt < len(BACKOFF_SECONDS):
+        return BACKOFF_SECONDS[attempt]
+    return BACKOFF_SECONDS[-1]
 
 
 def _pt_http_error(status: int, body: str) -> str:
@@ -190,12 +254,10 @@ class GeminiProvider(LlmProvider):
                     )
                     break
                 thinking = _uses_thinking(model)
-                for attempt, delay in enumerate((0.0, *BACKOFF_SECONDS)):
+                for attempt in range(1 + len(BACKOFF_SECONDS)):
                     remaining = deadline - time.monotonic()
                     if remaining < 4:
                         break
-                    if delay:
-                        await self._sleeper(min(delay, max(0.0, remaining - 3)))
                     url = f"{GEMINI_BASE}/models/{model}:generateContent"
                     request_timeout = min(self.attempt_timeout, remaining)
                     started = time.monotonic()
@@ -253,15 +315,22 @@ class GeminiProvider(LlmProvider):
                         break
                     if response.status_code in RETRY_STATUSES:
                         last_error = _pt_http_error(response.status_code, response.text)
+                        wait = retry_wait_seconds(response, attempt)
+                        remaining = deadline - time.monotonic()
                         logger.warning(
-                            "gemini model=%s outcome=retry status=%s duration=%.1fs",
+                            "gemini model=%s outcome=retry status=%s duration=%.1fs wait=%.1fs remaining=%.1fs",
                             model,
                             response.status_code,
                             elapsed,
+                            wait,
+                            remaining,
                         )
-                        if attempt < len(BACKOFF_SECONDS):
-                            continue
-                        break
+                        if attempt >= len(BACKOFF_SECONDS) or remaining < 4:
+                            break
+                        if wait > max(0.0, remaining - 4.0):
+                            break
+                        await self._sleeper(wait)
+                        continue
                     if response.status_code >= 400:
                         last_error = _pt_http_error(response.status_code, response.text)
                         logger.warning(

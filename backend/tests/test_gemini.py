@@ -7,7 +7,14 @@ import httpx
 
 from app.errors import translate_error
 from app.llm.base import ProviderError
-from app.llm.gemini import GEMINI_FALLBACKS, GeminiProvider, _candidate_models, list_gemini_models
+from app.llm.gemini import (
+    GEMINI_FALLBACKS,
+    GeminiProvider,
+    _candidate_models,
+    list_gemini_models,
+    retry_after_seconds,
+    retry_wait_seconds,
+)
 
 
 def _generate_ok(text: str = '{"interpretation":{"actions":[]},"reactions":[],"events":[],"report":{}}') -> httpx.Response:
@@ -152,6 +159,86 @@ class GeminiHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(sum(1 for url in hits if "gemini-flash-latest" in url), 2)
         self.assertTrue(any("gemini-3.1-flash-lite" in url for url in hits))
         self.assertEqual(sleeps, [0.4, 0.9])
+
+    async def test_429_respects_retry_after_then_falls_back(self):
+        hits: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            hits.append(str(request.url))
+            if "gemini-flash-latest" in str(request.url):
+                return httpx.Response(
+                    429,
+                    headers={"Retry-After": "2.5"},
+                    json={"error": {"message": "rate limit", "details": [{"retryDelay": "40s"}]}},
+                )
+            return _generate_ok("after-wait")
+
+        sleeps: list[float] = []
+
+        async def sleeper(delay: float) -> None:
+            sleeps.append(delay)
+
+        provider = GeminiProvider(
+            api_key="k",
+            model="gemini-flash-latest",
+            fallbacks=["gemini-3.1-flash-lite"],
+            client_factory=lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+            sleeper=sleeper,
+        )
+        text = await provider._complete("ping")
+        self.assertEqual(text, "after-wait")
+        self.assertGreaterEqual(sum(1 for url in hits if "gemini-flash-latest" in url), 2)
+        self.assertTrue(any("gemini-3.1-flash-lite" in url for url in hits))
+        self.assertEqual(sleeps, [2.5, 2.5])
+
+    async def test_429_skips_wait_when_retry_after_exceeds_budget(self):
+        hits: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            hits.append(str(request.url))
+            if "gemini-flash-latest" in str(request.url):
+                return httpx.Response(
+                    429,
+                    headers={"Retry-After": "60"},
+                    json={"error": {"message": "rate limit"}},
+                )
+            return _generate_ok("next-model")
+
+        sleeps: list[float] = []
+
+        async def sleeper(delay: float) -> None:
+            sleeps.append(delay)
+
+        provider = GeminiProvider(
+            api_key="k",
+            model="gemini-flash-latest",
+            fallbacks=["gemini-3.1-flash-lite"],
+            client_factory=lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+            sleeper=sleeper,
+            attempt_timeout=5.0,
+            total_budget=8.0,
+        )
+        text = await provider._complete("ping")
+        self.assertEqual(text, "next-model")
+        self.assertEqual(sum(1 for url in hits if "gemini-flash-latest" in url), 1)
+        self.assertTrue(any("gemini-3.1-flash-lite" in url for url in hits))
+        self.assertEqual(sleeps, [])
+
+    def test_retry_after_prefers_header_over_json(self):
+        response = httpx.Response(
+            429,
+            headers={"Retry-After": "3"},
+            json={"error": {"details": [{"retryDelay": "17s"}]}},
+        )
+        self.assertEqual(retry_after_seconds(response), 3.0)
+        self.assertEqual(retry_wait_seconds(response, 0), 3.0)
+
+    def test_retry_after_reads_json_delay(self):
+        response = httpx.Response(
+            429,
+            json={"error": {"details": [{"retryDelay": "8s"}]}},
+        )
+        self.assertEqual(retry_after_seconds(response), 8.0)
 
     async def test_thinking_400_retries_without_thinking_config(self):
         configs: list[dict] = []
