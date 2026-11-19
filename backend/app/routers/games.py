@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from app.engine.election import inaugurate, simulate_election, validate_proposals
 from app.engine.newgame import create_new_game
 from app.engine.turn import advance_months, queue_action
 from app.engine.whatif import build_what_if
@@ -13,6 +14,7 @@ from app.models import (
     ActionProposal,
     AdvisorRequest,
     AdvanceRequest,
+    CampaignRequest,
     ChatMessage,
     NewGameRequest,
     QueueActionRequest,
@@ -104,6 +106,35 @@ async def games():
 @router.get("/games/{game_id}")
 async def get_game(game_id: str):
     return public_state(_get(game_id))
+
+
+@router.post("/games/{game_id}/campaign")
+async def run_campaign(game_id: str, body: CampaignRequest):
+    state = _get(game_id)
+    if state.status != "playing":
+        raise HTTPException(status_code=400, detail="A partida já terminou.")
+    if state.campaign is not None:
+        raise HTTPException(status_code=400, detail="Esta partida já tem um mandato das urnas.")
+    try:
+        texts = validate_proposals(body.proposals)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    provider = _provider(state)
+    try:
+        classification = await provider.classify_campaign(texts)
+        _stamp_model(state, provider)
+    except ProviderError:
+        mock = MockProvider()
+        classification = await mock.classify_campaign(texts)
+        _stamp_model(state, mock)
+    except Exception:
+        mock = MockProvider()
+        classification = await mock.classify_campaign(texts)
+        _stamp_model(state, mock)
+    result = simulate_election(texts, classification, state.seed, state.difficulty)
+    inaugurate(state, result)
+    save_game(state)
+    return public_state(state)
 
 
 @router.post("/games/{game_id}/actions")

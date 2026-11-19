@@ -4,7 +4,8 @@ import asyncio
 import os
 from dataclasses import dataclass
 
-from app.constants import ProviderId
+from app.constants import MANDATE_LLM_MIN_ENGINE, ProviderId
+from app.engine.mandate import overlap_score
 from app.formatters import agent_verb, br_num, tidy_pt
 from app.llm.base import LlmProvider
 from app.models import (
@@ -12,6 +13,8 @@ from app.models import (
     ActionProposal,
     AdvisorReply,
     AgentReactionProposal,
+    CampaignClassification,
+    CampaignProposalHint,
     EventProposal,
     GameState,
     IndicatorDelta,
@@ -245,6 +248,32 @@ POLICIES = (
         summary="Movimento que envolve as Forças Armadas.",
     ),
     PolicyPattern(
+        keywords=(
+            "reeleição indefinida",
+            "reeleicao indefinida",
+            "mandato vitalício",
+            "mandato vitalicio",
+            "reeleição ilimitada",
+            "reeleicao ilimitada",
+        ),
+        title="PEC da reeleição indefinida",
+        category="institutional",
+        scope="massive",
+        requires_congress=True,
+        congress_difficulty=92,
+        effects=(
+            ("approval", -6.0, 0),
+            ("institutional_stability", -8.0, 0),
+            ("media_climate", -7.0, 0),
+            ("coalition_support", -9.0, 0),
+        ),
+        agents={"congresso": -14, "stf": -12, "imprensa": -10, "sociedade_civil": -8, "partidos": -6},
+        countries=("BRA",),
+        risks=("Oposição unifica o voto", "STF pode suspender a tramitação"),
+        timing="Reação institucional imediata; a tramitação, se existir, é longa.",
+        summary="Tentativa de mudar as regras de reeleição, com altíssima resistência no Congresso.",
+    ),
+    PolicyPattern(
         keywords=("amazônia", "amazonia", "desmatamento", "clima", "ibama"),
         title="Agenda ambiental",
         category="institutional",
@@ -331,6 +360,23 @@ def _proposal_from_policy(policy: PolicyPattern, text: str) -> ActionProposal:
         risks=list(policy.risks),
         timing_note=policy.timing,
     )
+
+
+def _with_mandate_hint(state: GameState, proposal: ActionProposal, text: str) -> ActionProposal:
+    campaign = state.campaign
+    if campaign is None or not campaign.proposals:
+        return proposal
+    best_index = 0
+    best_score = -1.0
+    for index, item in enumerate(campaign.proposals):
+        score = overlap_score(text, item)
+        if score > best_score:
+            best_index = index
+            best_score = score
+    if best_score >= MANDATE_LLM_MIN_ENGINE:
+        proposal.mandate_hint_index = best_index
+        proposal.mandate_hint_score = round(best_score, 3)
+    return proposal
 
 
 def _generic(text: str) -> ActionProposal:
@@ -547,7 +593,8 @@ class MockProvider(LlmProvider):
             if not text:
                 continue
             policy = _match(text)
-            actions.append(_proposal_from_policy(policy, text) if policy else _generic(text))
+            proposal = _proposal_from_policy(policy, text) if policy else _generic(text)
+            actions.append(_with_mandate_hint(state, proposal, text))
         proposal = actions[0] if actions else None
         warning = None
         joined = " ".join(texts).lower()
@@ -618,4 +665,46 @@ class MockProvider(LlmProvider):
             ),
             disagrees=False,
             risk_level="moderado" if state.indicators["approval"] > 40 else "alto",
+        )
+
+    async def classify_campaign(self, texts: list[str]) -> CampaignClassification:
+        await mock_llm_delay()
+        self.last_model = "simulação offline"
+        hints: list[CampaignProposalHint] = []
+        for text in texts:
+            policy = _match(text)
+            if policy:
+                popularity = 0.78 if policy.scope in {"large", "massive"} else 0.6
+                hints.append(
+                    CampaignProposalHint(
+                        category=policy.category,  # type: ignore[arg-type]
+                        popularity=popularity,
+                        alignment=0.82,
+                        keywords=list(policy.keywords[:6]),
+                        summary=policy.summary,
+                    )
+                )
+            else:
+                tokens = [token for token in text.lower().split() if len(token) >= 5][:6]
+                hints.append(
+                    CampaignProposalHint(
+                        category="other",
+                        popularity=0.5,
+                        alignment=0.55,
+                        keywords=tokens,
+                        summary=text[:180],
+                    )
+                )
+        categories = {item.category for item in hints}
+        coherence = 0.7 if len(categories) <= 3 else 0.48
+        titles = [item.summary or texts[index][:40] for index, item in enumerate(hints)]
+        narrative = (
+            "A campanha defendeu: " + "; ".join(titles[:3]) + ". "
+            "A mensagem foi clara o bastante para consolidar voto útil, "
+            "e o eleitorado cobrará essas entregas a partir da posse."
+        )
+        return CampaignClassification(
+            proposals=hints,
+            platform_coherence=coherence,
+            narrative=narrative,
         )

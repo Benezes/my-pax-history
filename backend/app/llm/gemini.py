@@ -15,8 +15,8 @@ from app.constants import (
 )
 from app.llm.base import LlmProvider, ProviderError
 from app.llm.jsonutil import JsonParseError, parse_model
-from app.llm.prompts import advisor_prompt, estimate_prompt, turn_prompt
-from app.models import AdvisorReply, GameState, TurnLlmBundle
+from app.llm.prompts import advisor_prompt, campaign_prompt, estimate_prompt, turn_prompt
+from app.models import AdvisorReply, CampaignClassification, GameState, TurnLlmBundle
 
 logger = logging.getLogger("presidencia.llm")
 
@@ -315,4 +315,15 @@ class GeminiProvider(LlmProvider):
         except JsonParseError:
             return AdvisorReply(reply=raw.strip()[:2000], disagrees=False, risk_level="moderado")
         assert isinstance(parsed, AdvisorReply)
+        return parsed
+
+    async def classify_campaign(self, texts: list[str]) -> CampaignClassification:
+        raw = await self._complete(campaign_prompt(texts))
+        try:
+            parsed = parse_model(raw, CampaignClassification)
+        except JsonParseError as exc:
+            raise ProviderError(
+                "A IA não classificou a campanha em JSON válido. Tente de novo ou use o modo offline."
+            ) from exc
+        assert isinstance(parsed, CampaignClassification)
         return parsed

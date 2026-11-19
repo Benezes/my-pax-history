@@ -3,6 +3,7 @@ from __future__ import annotations
 from random import Random
 
 from app.constants import DIFFICULTY_PARAMS
+from app.engine.mandate import MandateAssessment, mandate_pass_delta
 from app.formatters import br_num
 from app.models import ActionProposal, GameState, Party
 
@@ -42,7 +43,9 @@ def projected_votes(state: GameState, proposal: ActionProposal) -> tuple[float, 
     return chamber_share, senate_share
 
 
-def pass_chance(state: GameState, proposal: ActionProposal) -> float:
+def pass_chance(
+    state: GameState, proposal: ActionProposal, mandate: MandateAssessment | None = None
+) -> float:
     if not proposal.requires_congress:
         return 1.0
     chamber, senate = projected_votes(state, proposal)
@@ -59,11 +62,18 @@ def pass_chance(state: GameState, proposal: ActionProposal) -> float:
         - difficulty["opposition_block_bonus"] / 200.0
     )
     raw += {"medio": 0.18, "dificil": 0.07, "impossivel": 0.0}[state.difficulty]
-    return max(0.05, min(0.92, raw))
+    if mandate is not None:
+        raw += mandate_pass_delta(mandate)
+    return max(0.05, min(0.95, raw))
 
 
-def roll_vote(state: GameState, proposal: ActionProposal, rng: Random) -> tuple[bool, str, float]:
-    chance = pass_chance(state, proposal)
+def roll_vote(
+    state: GameState,
+    proposal: ActionProposal,
+    rng: Random,
+    mandate: MandateAssessment | None = None,
+) -> tuple[bool, str, float]:
+    chance = pass_chance(state, proposal, mandate)
     if not proposal.requires_congress:
         return True, "Medida de competência privativa do Executivo.", chance
     passed = rng.random() < chance

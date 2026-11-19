@@ -300,6 +300,62 @@ LOSS_REASONS = {
     },
 }
 
+CAMPAIGN_MIN_PROPOSALS = 3
+CAMPAIGN_MAX_PROPOSALS = 5
+CAMPAIGN_PROPOSAL_MIN_CHARS = 12
+CAMPAIGN_PROPOSAL_MAX_CHARS = 400
+
+ELECTION_FIRST_ROUND_BASE = 46.0
+ELECTION_PLATFORM_FIRST_PP = 12.0
+ELECTION_PLATFORM_RUNOFF_PP = 6.5
+ELECTION_FIRST_MIN = 38.0
+ELECTION_FIRST_MAX = 58.0
+ELECTION_RUNOFF_MIN = 50.2
+ELECTION_RUNOFF_MAX = 61.5
+ELECTION_DIFFICULTY_PENALTY_PP = {
+    Difficulty.MEDIO: 0.0,
+    Difficulty.DIFICIL: 1.6,
+    Difficulty.IMPOSSIVEL: 3.2,
+}
+
+COALITION_CHAMBER_MIN = 0.40
+COALITION_CHAMBER_MAX = 0.58
+COALITION_SENATE_MIN = 0.38
+COALITION_SENATE_MAX = 0.55
+SEATS_PER_MARGIN_PP_CHAMBER = 2.1
+SEATS_PER_PLATFORM_CHAMBER = 16.0
+SEATS_PER_MARGIN_PP_SENATE = 0.32
+SEATS_PER_PLATFORM_SENATE = 3.5
+
+MANDATE_MATCH_THRESHOLD = 0.22
+MANDATE_LLM_MIN_ENGINE = 0.12
+MANDATE_YEAR_DECAY = (1.0, 0.55, 0.28, 0.12)
+MANDATE_CAPITAL_REDUCTION = 0.35
+MANDATE_PASS_BONUS = 0.18
+MANDATE_POPULARITY_FLOOR = 0.4
+REJECTION_CAPITAL_REFUND = 0.5
+HONEYMOON_CAPITAL_BONUS = 6.0
+HONEYMOON_APPROVAL_PER_MARGIN_PP = 0.18
+
+UNCONSTITUTIONAL_TOKENS = (
+    "fechar o congresso",
+    "fechar congresso",
+    "fechar o stf",
+    "fechar o supremo",
+    "golpe",
+    "autogolpe",
+    "cancelar eleição",
+    "cancelar as eleições",
+    "cancelar eleicoes",
+    "revogar a constituição",
+    "revogar a constituicao",
+    "ditadura",
+    "ai-5",
+    "ai5",
+    "intervenção militar",
+    "intervencao militar",
+)
+
 INDICATOR_LABELS = {
     "selic": "Selic",
     "inflation": "Inflação (IPCA)",

@@ -78,6 +78,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   meta: () => request<MetaResponse>("/api/meta"),
+  runCampaign: (id: string, proposals: string[]) =>
+    request<Game>(`/api/games/${id}/campaign`, { method: "POST", body: JSON.stringify({ proposals }) }),
   createGame: (body: {
     difficulty: string;
     provider: string;

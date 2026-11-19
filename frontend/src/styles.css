@@ -271,6 +271,7 @@ button { cursor: pointer; }
   min-height: 0;
   flex: 0 1 auto;
 }
+.dock:has(.whatif) { max-height: min(58vh, 520px); }
 .dock-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 8px; }
 .dock textarea { width: 100%; min-height: 72px; max-height: 140px; resize: vertical; }
 .dock-actions { justify-content: flex-start; margin-top: 10px; }
@@ -303,6 +304,19 @@ button { cursor: pointer; }
 .tag.partial { background: #5a4718; }
 .tag.blocked { background: #5a241c; }
 .tag.rejected { background: #5a241c; }
+.tag.mandate { background: #1d4a36; color: #d7f0e4; }
+.tag.refund { background: #3d3a16; color: #f0e7b8; }
+.mandate-list { display: grid; gap: 12px; margin: 12px 0 8px; }
+.mandate-bar {
+  height: 8px;
+  background: #1a303d;
+  border-radius: 99px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+.mandate-bar > i { display: block; height: 100%; background: var(--gold); }
+.chamber-list { margin: 8px 0 0; padding-left: 18px; color: var(--muted); line-height: 1.45; }
+.field textarea { min-height: 78px; resize: vertical; }
 .over {
   min-height: 100dvh;
   display: grid;

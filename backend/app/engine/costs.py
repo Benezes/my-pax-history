@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.constants import DIFFICULTY_PARAMS, FISCAL_COST_BRL_BI, POLITICAL_COST, SCOPE_ORDER
+from app.engine.mandate import MandateAssessment, mandate_cost_factor
 from app.formatters import br_num
 from app.models import ActionCost, ActionProposal, GameState, ResourceVerdict
 
@@ -36,7 +37,12 @@ def infer_scope(text: str, proposed: str) -> str:
     return proposed if proposed in SCOPE_ORDER else "medium"
 
 
-def compute_cost(state: GameState, proposal: ActionProposal, raw_text: str = "") -> ActionCost:
+def compute_cost(
+    state: GameState,
+    proposal: ActionProposal,
+    raw_text: str = "",
+    mandate: MandateAssessment | None = None,
+) -> ActionCost:
     scope = infer_scope(raw_text, proposal.scope)
     idx = _index(scope)
     fiscal = FISCAL_COST_BRL_BI.get(proposal.category, FISCAL_COST_BRL_BI["other"])[idx]
@@ -51,6 +57,8 @@ def compute_cost(state: GameState, proposal: ActionProposal, raw_text: str = "")
         political *= 1.12
     if state.congress.coalition_support < 40:
         political *= 1.1
+    if mandate is not None:
+        political *= mandate_cost_factor(mandate)
     return ActionCost(
         fiscal_brl_bi=round(fiscal, 2),
         political=round(political, 2),

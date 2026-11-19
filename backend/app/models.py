@@ -198,6 +198,9 @@ class ActionProposal(BaseModel):
     tags: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     timing_note: str = ""
+    mandate_hint_index: int | None = None
+    mandate_hint_score: float = 0.0
+    contradicts_campaign: bool = False
 
 
 class ActionInterpretation(BaseModel):
@@ -328,6 +331,10 @@ class ResolvedAction(BaseModel):
     fiscal_cost_brl_bi: float = 0.0
     political_cost: float = 0.0
     countries: list[str] = Field(default_factory=list)
+    mandate_applied: bool = False
+    mandate_note: str = ""
+    capital_refunded: float = 0.0
+    limit_kind: str = ""
 
 
 class MapCountry(BaseModel):
@@ -377,6 +384,49 @@ class WhatIfResult(BaseModel):
     disagrees: bool = False
     countries: list[str] = Field(default_factory=list)
     answered_by: str = ""
+    mandate_applied: bool = False
+    mandate_note: str = ""
+
+
+class CampaignProposalHint(BaseModel):
+    category: ActionCategory = "other"
+    popularity: float = 0.5
+    alignment: float = 0.5
+    keywords: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+
+class CampaignClassification(BaseModel):
+    proposals: list[CampaignProposalHint] = Field(default_factory=list)
+    platform_coherence: float = 0.5
+    narrative: str = ""
+
+
+class CampaignMandateItem(BaseModel):
+    id: str
+    text: str
+    category: str = "other"
+    weight: float = 0.0
+    popularity: float = 0.5
+    alignment: float = 0.5
+    keywords: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+
+class CampaignResult(BaseModel):
+    first_round_share: float
+    runoff: bool
+    second_round_share: float | None = None
+    winner_share: float
+    opponent_share: float
+    margin_pp: float
+    turnout: float = 79.2
+    narrative: str = ""
+    proposals: list[CampaignMandateItem] = Field(default_factory=list)
+    coalition_support: float = 0.0
+    chamber: Chamber | None = None
+    senate: Chamber | None = None
+    platform_strength: float = 0.0
 
 
 class GameState(BaseModel):
@@ -425,6 +475,8 @@ class GameState(BaseModel):
     loss_title: str | None = None
     loss_body: str | None = None
     months_elapsed: int = 0
+    campaign_pending: bool = False
+    campaign: CampaignResult | None = None
 
 
 class NewGameRequest(BaseModel):
@@ -450,6 +502,10 @@ class AdvisorRequest(BaseModel):
 
 class WhatIfRequest(BaseModel):
     text: str = Field(min_length=3, max_length=12000)
+
+
+class CampaignRequest(BaseModel):
+    proposals: list[str]
 
 
 class SaveRequest(BaseModel):
