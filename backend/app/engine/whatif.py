@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from app.constants import INDICATOR_LABELS
-from app.engine.congress import pass_chance
+from app.formatters import months_pt
+from app.engine.congress import pass_chance, stamp_amendment
 from app.engine.costs import compute_cost, verdict
+from app.engine.mandate import assess_mandate, unconstitutional_reason
 from app.models import (
     ActionProposal,
     AgentPreview,
@@ -79,17 +81,49 @@ def build_what_if(
     disagrees: bool,
     reactions: list[AgentReactionProposal] | None = None,
 ) -> WhatIfResult:
-    cost = compute_cost(state, proposal, raw_text)
+    stamp_amendment(proposal, raw_text)
+    mandate = assess_mandate(state, raw_text, proposal)
+    illegal = unconstitutional_reason(raw_text)
+    cost = compute_cost(state, proposal, raw_text, mandate)
     resource = verdict(state, cost)
-    chance = pass_chance(state, proposal) if resource.mode != "blocked" else 0.0
+    if illegal:
+        resource = resource.model_copy(
+            update={
+                "mode": "blocked",
+                "scale": 0.0,
+                "fiscal_spent": 0.0,
+                "political_spent": 0.0,
+                "message": illegal,
+            }
+        )
+    elif mandate.contradicts:
+        resource = resource.model_copy(
+            update={
+                "mode": "blocked",
+                "scale": 0.0,
+                "fiscal_spent": 0.0,
+                "political_spent": 0.0,
+                "message": mandate.contradict_reason,
+            }
+        )
+    chance = pass_chance(state, proposal, mandate) if resource.mode != "blocked" else 0.0
+    commentary_extra = commentary
+    if illegal and illegal not in commentary_extra:
+        commentary_extra = (commentary + " " + illegal).strip()
+    elif mandate.contradicts and mandate.contradict_reason not in commentary_extra:
+        commentary_extra = (commentary + " " + mandate.contradict_reason).strip()
     timing = proposal.timing_note
     if not timing:
         delays = [e.delay_months for e in proposal.intended_effects if e.delay_months > 0]
-        timing = (
-            f"Parte dos efeitos aparece em {min(delays)}–{max(delays)} meses."
-            if delays
-            else "Efeitos principalmente no curto prazo, com risco de reação imediata dos agentes."
-        )
+        if delays:
+            low, high = min(delays), max(delays)
+            timing = (
+                f"Parte dos efeitos aparece {months_pt(low)}."
+                if low == high
+                else f"Parte dos efeitos aparece em {low} a {high} meses."
+            )
+        else:
+            timing = "Efeitos principalmente no curto prazo, com risco de reação imediata dos agentes."
     return WhatIfResult(
         title=proposal.title,
         summary=proposal.summary,
@@ -108,7 +142,9 @@ def build_what_if(
         agent_reactions=_agents(state, proposal, reactions or []),
         risks=list(proposal.risks),
         timing_note=timing,
-        advisor_commentary=commentary,
+        advisor_commentary=commentary_extra,
         disagrees=disagrees,
         countries=proposal.affected_countries,
+        mandate_applied=mandate.applied,
+        mandate_note=mandate.note,
     )

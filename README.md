@@ -50,7 +50,8 @@ Na nova partida:
    - **Google Gemini**
    - **LLM local (Ollama)**
 2. Escolha a dificuldade (Médio / Difícil / Impossível). A dificuldade muda profundidade estratégica dos agentes, antecipação e intensidade das consequências, não só os números.
-3. Assuma a Presidência.
+3. Escreva 3 a 5 propostas de campanha e **vá às urnas**. O motor simula voto e Congresso; a IA só classifica a plataforma.
+4. Na posse, o mandato das urnas barateia ações alinhadas às propostas — sobretudo no primeiro ano.
 
 Escreva ações, use **E se?** para um ensaio do assessor (não altera o estado), **registre** a ação e **avance o tempo**. Cada ciclo mensal: ações → reações dos agentes → indicadores → eventos → relatório.
 
@@ -64,6 +65,17 @@ Toda ação tem custo calculado **pelo motor**:
 - **Capital político** — regenera lentamente conforme aprovação e apoio no Congresso.
 
 A IA só estima o **escopo** (pequeno/médio/grande/massivo). Se faltar recurso, a ação é **bloqueada** ou **executada pela metade**, com recado em português no relatório.
+
+Se o Congresso **rejeitar** a medida, o espaço fiscal não é empenhado e **metade** do capital político cobrado volta (constante `REJECTION_CAPITAL_REFUND`).
+
+## Campanha, Congresso e mandato das urnas
+
+Novas partidas começam na campanha de 2026, antes de janeiro de 2027. Saves antigos sem campanha continuam jogáveis como antes.
+
+- **Urnas:** o motor calcula voto (1º turno ou 2º, se precisar), margem e o peso de cada proposta no mandato. A IA/mock só classifica e narra, em JSON validado.
+- **Congresso:** a base na Câmara e no Senado cresce com a margem e o alinhamento da plataforma, com teto para não entregar supermaioria de graça.
+- **Mandato das urnas:** ação alinhada a uma proposta de campanha custa menos capital e tem mais chance de passar. O bônus é maior no ano 1, cai com o tempo e com popularidade baixa (`MANDATE_*` em `backend/app/constants.py`).
+- **Limites:** inconstitucional, sem orçamento ou em contradição com a própria campanha ainda bloqueia; o relatório diz o motivo em português e se o bônus chegou a valer.
 
 ## Provedores de IA
 

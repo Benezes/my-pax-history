@@ -1,4 +1,4 @@
-export type View = "title" | "new" | "load" | "game" | "settings";
+export type View = "title" | "new" | "load" | "campaign" | "game" | "settings";
 
 export interface ProviderInfo {
   id: string;
@@ -86,6 +86,10 @@ export interface ResolvedAction {
   scale: number;
   fiscal_cost_brl_bi: number;
   political_cost: number;
+  mandate_applied?: boolean;
+  mandate_note?: string;
+  capital_refunded?: number;
+  limit_kind?: string;
 }
 
 export interface EffectPreview {
@@ -126,6 +130,35 @@ export interface WhatIfResult {
   disagrees: boolean;
   countries: string[];
   answered_by?: string;
+  mandate_applied?: boolean;
+  mandate_note?: string;
+}
+
+export interface CampaignMandateItem {
+  id: string;
+  text: string;
+  category: string;
+  weight: number;
+  popularity: number;
+  alignment: number;
+  keywords: string[];
+  summary: string;
+}
+
+export interface CampaignResult {
+  first_round_share: number;
+  runoff: boolean;
+  second_round_share: number | null;
+  winner_share: number;
+  opponent_share: number;
+  margin_pp: number;
+  turnout: number;
+  narrative: string;
+  proposals: CampaignMandateItem[];
+  coalition_support: number;
+  chamber: { seats: number; government: number; allied: number; opposition: number; independent: number } | null;
+  senate: { seats: number; government: number; allied: number; opposition: number; independent: number } | null;
+  platform_strength: number;
 }
 
 export interface Game {
@@ -148,8 +181,8 @@ export interface Game {
   political_capital: number;
   congress: {
     coalition_support: number;
-    chamber: Record<string, number>;
-    senate: Record<string, number>;
+    chamber: { seats: number; government: number; allied: number; opposition: number; independent: number };
+    senate: { seats: number; government: number; allied: number; opposition: number; independent: number };
   };
   branches: Record<string, number>;
   agents: Agent[];
@@ -172,6 +205,16 @@ export interface Game {
   scheduled_count: number;
   headlines: Array<{ id: string; title: string; outlet: string; tone: string }>;
   advisor_reply?: { reply: string; disagrees: boolean; risk_level: string };
+  campaign_pending?: boolean;
+  campaign?: CampaignResult | null;
+}
+
+export interface CostPreview {
+  political_cost: number;
+  fiscal_cost_brl_bi: number;
+  mandate_applied: boolean;
+  constitutional_amendment: boolean;
+  note: string;
 }
 
 export interface SaveRow {

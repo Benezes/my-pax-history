@@ -96,6 +96,8 @@ def public_state(state: GameState) -> dict:
         "loss_title": state.loss_title,
         "loss_body": state.loss_body,
         "months_elapsed": state.months_elapsed,
+        "campaign_pending": state.campaign_pending and state.campaign is None,
+        "campaign": state.campaign.model_dump() if state.campaign else None,
         "scheduled_count": len(state.scheduled_effects),
         "ministers": [item.model_dump() for item in state.ministers],
         "cabinet_mode": state.cabinet_mode,

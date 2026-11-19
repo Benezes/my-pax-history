@@ -1,10 +1,25 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import BusyStatus, { type AiKind } from "./components/BusyStatus";
+import CampaignScreen from "./components/CampaignScreen";
 import GlobeView from "./components/GlobeView";
 import PendingAction from "./components/PendingAction";
 import { ACTION_MAX, ACTION_MIN, ADVISOR_MAX } from "./limits";
-import type { Game, MetaResponse, SaveRow, View, WhatIfResult } from "./types";
+import type { CostPreview, Game, MetaResponse, SaveRow, View, WhatIfResult } from "./types";
+
+const ACTION_TYPE_PT: Record<string, string> = {
+  support: "apoio",
+  oppose: "oposição",
+  bargain: "negociação",
+  mobilize: "mobilização",
+  investigate: "investigação",
+  neutral: "neutro",
+};
+
+function monthsLabel(count: number) {
+  const n = Math.max(0, Math.round(count));
+  return n === 1 ? "em 1 mês" : `em ${n} meses`;
+}
 
 const GEMINI_KEY_STORAGE = "presidencia.geminiApiKey";
 
@@ -48,6 +63,11 @@ function Toast({ message, onClose }: { message: string; onClose: () => void }) {
   );
 }
 
+function playView(game: Game): View {
+  if (game.campaign_pending && !game.campaign) return "campaign";
+  return "game";
+}
+
 function formatIndicator(id: string, value: number) {
   if (id === "public_debt_gdp") return `${NUM(value)}% PIB`;
   if (id === "crime_index") return NUM(value, 0);
@@ -81,7 +101,7 @@ export default function App() {
           try {
             const created = await api.createGame(payload);
             setGame(created);
-            setView("game");
+            setView(playView(created));
           } catch (err) {
             setError((err as Error).message);
           } finally {
@@ -101,7 +121,7 @@ export default function App() {
           try {
             const loaded = id.includes("-save-") ? await api.load(id) : await api.getGame(id);
             setGame(loaded);
-            setView("game");
+            setView(playView(loaded));
           } catch (err) {
             setError((err as Error).message);
           } finally {
@@ -118,7 +138,7 @@ export default function App() {
         meta={meta}
         error={error}
         busy={busy}
-        onBack={() => setView(game ? "game" : "title")}
+        onBack={() => setView(game ? playView(game) : "title")}
         onSaved={async () => {
           try {
             setMeta(await api.meta());
@@ -129,6 +149,32 @@ export default function App() {
         }}
         setBusy={setBusy}
         setError={setError}
+      />
+    );
+  }
+  if (game && (view === "campaign" || (game.campaign_pending && !game.campaign))) {
+    return (
+      <CampaignScreen
+        game={game}
+        error={error}
+        busy={busy}
+        onBack={() => {
+          setGame(null);
+          setView("title");
+        }}
+        onRun={async (proposals) => {
+          setBusy(true);
+          setError("");
+          try {
+            setGame(await api.runCampaign(game.id, proposals));
+            setView("campaign");
+          } catch (err) {
+            setError((err as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        onInaugurate={() => setView("game")}
       />
     );
   }
@@ -155,8 +201,9 @@ export default function App() {
         <div className="kicker">Janeiro de 2027</div>
         <h1>Simulador de Presidência do Brasil</h1>
         <p>
-          Você acaba de tomar posse. Escreva decisões em linguagem natural, gaste espaço fiscal e
-          capital político, e tente chegar a 2030 sem impeachment, golpe ou derrota eleitoral.
+          A partida começa na campanha de 2026. Escreva 3 a 5 propostas, dispute a urna e só então
+          tome posse. No governo, decisões em linguagem natural gastam espaço fiscal e capital
+          político — cumprir o mandato das urnas fica mais barato no primeiro ano.
         </p>
         {error && <div className="banner">{error}</div>}
         <div className="row">
@@ -212,10 +259,10 @@ function NewGame({
           ← Voltar
         </button>
         <div className="kicker">Configuração da partida</div>
-        <h1>Assumir a Presidência</h1>
+        <h1>Preparar a campanha</h1>
         <p className="muted">
-          O motor da simulação aplica as regras. A IA interpreta ações, agentes e narrativa. O modo
-          offline permite jogar sem nenhum modelo.
+          Depois desta tela você escreve as propostas e vai às urnas. O motor aplica as regras; a IA
+          só classifica a plataforma e escreve a narrativa. O modo offline funciona sem nenhum modelo.
         </p>
         {error && <div className="banner">{error}</div>}
         <h3>Provedor de IA</h3>
@@ -283,7 +330,7 @@ function NewGame({
             });
           }}
         >
-          {busy ? "Preparando o Palácio..." : "Assumir a Presidência"}
+          {busy ? "Abrindo a campanha..." : "Ir para a campanha"}
         </button>
       </div>
     </div>
@@ -362,11 +409,24 @@ function GameScreen({
   const [whatIf, setWhatIf] = useState<WhatIfResult | null>(null);
   const [advice, setAdvice] = useState("");
   const [saveName, setSaveName] = useState("Arquivo 1");
+  const [costPreview, setCostPreview] = useState<CostPreview | null>(null);
   const [aiJob, setAiJob] = useState<{ kind: AiKind; months: number } | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [stepIndex, setStepIndex] = useState(0);
   const over = game.status !== "playing";
   const aiBusy = Boolean(aiJob);
+
+  useEffect(() => {
+    const text = draft.trim();
+    if (text.length < ACTION_MIN || over) {
+      setCostPreview(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      api.costPreview(game.id, text).then(setCostPreview).catch(() => setCostPreview(null));
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [draft, game.id, over]);
 
   useEffect(() => {
     const apply = () => {
@@ -599,6 +659,28 @@ function GameScreen({
           </div>
           <h3 style={{ marginTop: 16 }}>Congresso</h3>
           <p className="muted">Apoio da coalizão {PCT(game.congress.coalition_support, 0)}</p>
+          <p className="muted">
+            Câmara: base {(game.congress.chamber.government || 0) + (game.congress.chamber.allied || 0)}/
+            {game.congress.chamber.seats} · governo {game.congress.chamber.government} · aliados{" "}
+            {game.congress.chamber.allied} · oposição {game.congress.chamber.opposition}
+          </p>
+          <p className="muted">
+            Senado: base {(game.congress.senate.government || 0) + (game.congress.senate.allied || 0)}/
+            {game.congress.senate.seats} · governo {game.congress.senate.government} · aliados{" "}
+            {game.congress.senate.allied} · oposição {game.congress.senate.opposition}
+          </p>
+          {game.campaign?.proposals?.length ? (
+            <>
+              <h3 style={{ marginTop: 16 }}>Mandato das urnas</h3>
+              <ul className="chamber-list">
+                {game.campaign.proposals.map((item) => (
+                  <li key={item.id}>
+                    {item.summary || item.text} ({PCT(item.weight * 100, 0)})
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
           <h3 style={{ marginTop: 16 }}>Agentes</h3>
           {game.agents.map((agent) => (
             <div className="agent" key={agent.id}>
@@ -636,7 +718,7 @@ function GameScreen({
           {tab === "report" && (
             <div className="report">
               {game.last_resolved.map((item) => (
-                <article key={item.title}>
+                <article key={`${item.title}-${item.execution}`}>
                   <h4>{item.title}</h4>
                   <span className={`tag ${item.execution}`}>
                     {item.execution === "blocked"
@@ -647,7 +729,16 @@ function GameScreen({
                           ? "executada"
                           : "parcial"}
                   </span>
+                  {item.mandate_applied ? <span className="tag mandate">Mandato das urnas</span> : null}
+                  {item.capital_refunded ? (
+                    <span className="tag refund">
+                      Devolvidos {NUM(item.capital_refunded)} de capital
+                    </span>
+                  ) : null}
                   <p>{item.reason}</p>
+                  {item.mandate_note && !item.reason.includes(item.mandate_note) ? (
+                    <p className="muted">{item.mandate_note}</p>
+                  ) : null}
                 </article>
               ))}
               {game.last_report ? (
@@ -740,43 +831,54 @@ function GameScreen({
         </aside>
       </div>
       <div className="dock">
-        <div className="dock-head">
-          <div className="kicker">Campo de ações</div>
-          <span className={`counter ${overLimit ? "over" : ""}`}>
-            {draft.length.toLocaleString("pt-BR")} / {ACTION_MAX.toLocaleString("pt-BR")}
-          </span>
-        </div>
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          maxLength={ACTION_MAX + 200}
-          placeholder="Ex.: Propor uma reforma tributária gradual e negociar a base do centrão com emendas de infraestrutura no Nordeste."
-        />
-        {game.pending_actions.length > 0 && (
-          <div className="pending">
-            {game.pending_actions.map((item) => (
-              <PendingAction key={item.id} text={item.text} />
-            ))}
-          </div>
-        )}
-        {aiJob && (aiJob.kind !== "advisor" || tab !== "advisor") && (
-          <BusyStatus kind={aiJob.kind} months={aiJob.months} elapsed={elapsed} stepIndex={stepIndex} />
-        )}
-        <div className="row dock-actions">
-          <button className="btn" disabled={busy || aiBusy || tooShort || overLimit} onClick={askWhatIf}>
-            E se?
-          </button>
-          <button className="btn primary" disabled={busy || aiBusy || tooShort || overLimit} onClick={confirmAction}>
-            Registrar ação
-          </button>
-          <button className="btn" disabled={busy || aiBusy} onClick={() => advance(1)}>
-            Avançar 1 mês
-          </button>
-          <button className="btn" disabled={busy || aiBusy} onClick={() => advance(3)}>
-            Avançar 3 meses
-          </button>
-        </div>
         {whatIf && <WhatIfPanel result={whatIf} onConfirm={confirmAction} onClose={() => setWhatIf(null)} />}
+        <div className="dock-main">
+          <div className="dock-head">
+            <div className="kicker">Campo de ações</div>
+            <span className={`counter ${overLimit ? "over" : ""}`}>
+              {draft.length.toLocaleString("pt-BR")} / {ACTION_MAX.toLocaleString("pt-BR")}
+            </span>
+          </div>
+          <div className="dock-body">
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              maxLength={ACTION_MAX + 200}
+              placeholder="Ex.: Propor uma reforma tributária gradual e negociar a base do centrão com emendas de infraestrutura no Nordeste."
+            />
+            {costPreview && !tooShort && (
+              <p className="cost-preview">
+                Estimativa: cerca de <b>{NUM(costPreview.political_cost, 0)} de capital político</b>
+                {costPreview.mandate_applied ? " · mandato das urnas" : ""}
+                {costPreview.constitutional_amendment ? " · PEC (3/5)" : ""}
+              </p>
+            )}
+            {game.pending_actions.length > 0 && (
+              <div className="pending">
+                {game.pending_actions.map((item) => (
+                  <PendingAction key={item.id} text={item.text} />
+                ))}
+              </div>
+            )}
+            {aiJob && (aiJob.kind !== "advisor" || tab !== "advisor") && (
+              <BusyStatus kind={aiJob.kind} months={aiJob.months} elapsed={elapsed} stepIndex={stepIndex} />
+            )}
+          </div>
+          <div className="row dock-actions">
+            <button className="btn" disabled={busy || aiBusy || tooShort || overLimit} onClick={askWhatIf}>
+              E se?
+            </button>
+            <button className="btn primary" disabled={busy || aiBusy || tooShort || overLimit} onClick={confirmAction}>
+              Registrar ação
+            </button>
+            <button className="btn" disabled={busy || aiBusy} onClick={() => advance(1)}>
+              Avançar 1 mês
+            </button>
+            <button className="btn" disabled={busy || aiBusy} onClick={() => advance(3)}>
+              Avançar 3 meses
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -938,22 +1040,27 @@ function WhatIfPanel({
 }) {
   return (
     <div className="whatif">
+      <div className="whatif-body">
       <div className="kicker">E se?</div>
       <ModelNote name={result.answered_by} />
       <h3>{result.title}</h3>
-      <p>{result.summary}</p>
       <span className={`tag ${result.execution}`}>
         {result.execution === "full"
           ? "cabe no orçamento"
           : result.execution === "partial"
             ? "execução parcial"
-            : "seria bloqueada"}
+            : result.execution === "rejected"
+              ? "seria rejeitada"
+              : "seria bloqueada"}
       </span>
+      {result.mandate_applied ? <span className="tag mandate">Mandato das urnas</span> : null}
+      <p>{result.summary}</p>
       <p>
         Custo estimado: <b>R$ {MONEY(result.fiscal_cost_brl_bi)} bi</b> e{" "}
         <b>{NUM(result.political_cost, 0)} de capital político</b>. Disponível: R${" "}
         {MONEY(result.fiscal_available)} bi / {NUM(result.political_available, 0)} cap.
       </p>
+      {result.mandate_note ? <p>{result.mandate_note}</p> : null}
       <p>{result.resource_message}</p>
       {result.requires_congress && (
         <p>Requer Congresso. Chance projetada de aprovação: {PCT(result.pass_chance * 100, 0)}.</p>
@@ -965,7 +1072,7 @@ function WhatIfPanel({
             <li key={item.indicator}>
               {item.label}: {item.immediate_delta ? `${item.immediate_delta > 0 ? "+" : ""}${NUM(item.immediate_delta)} agora` : ""}
               {item.delayed_delta
-                ? ` ${item.delayed_delta > 0 ? "+" : ""}${NUM(item.delayed_delta)} em ${item.delay_months} mês(es)`
+                ? ` ${item.delayed_delta > 0 ? "+" : ""}${NUM(item.delayed_delta)} ${monthsLabel(item.delay_months)}`
                 : ""}
             </li>
           ))}
@@ -975,14 +1082,17 @@ function WhatIfPanel({
         <ul>
           {result.agent_reactions.map((item) => (
             <li key={item.agent_id}>
-              {item.name} ({item.action_type}) {item.statement}
+              {item.name} ({ACTION_TYPE_PT[item.action_type] || item.action_type}) {item.statement}
             </li>
           ))}
         </ul>
       )}
       {result.risks.length > 0 && <p>Riscos: {result.risks.join("; ")}.</p>}
-      <p className={result.disagrees ? "banner" : ""}>{result.advisor_commentary}</p>
-      <div className="row" style={{ justifyContent: "flex-start" }}>
+      {result.advisor_commentary ? (
+        <p className={result.disagrees ? "banner" : ""}>{result.advisor_commentary}</p>
+      ) : null}
+      </div>
+      <div className="row whatif-actions">
         <button className="btn primary" onClick={onConfirm}>
           {result.execution === "blocked" ? "Registrar mesmo assim" : "Confirmar ação"}
         </button>

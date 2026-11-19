@@ -229,7 +229,7 @@ function WebGlGlobe({ countries }: Props) {
           arcAltitude={0.18}
         />
       )}
-      <div className="globe-caption">Países envolvidos nos acontecimentos recentes</div>
+      <div className="globe-caption">Países envolvidos nos acontecimentos recentes · globo 3D</div>
     </div>
   );
 }
@@ -321,7 +321,7 @@ function FallbackGlobe({ countries }: Props) {
         })}
       </svg>
       {hover && <div className="globe-tip-live">{hover}</div>}
-      <div className="globe-caption">Países envolvidos nos acontecimentos recentes · mapa 2D</div>
+      <div className="globe-caption">Países envolvidos nos acontecimentos recentes · globo (modo simplificado)</div>
     </div>
   );
 }

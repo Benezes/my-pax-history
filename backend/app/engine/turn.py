@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from random import Random
 
-from app.constants import AGENT_IDS, GameStatus
+from app.constants import AGENT_IDS, REJECTION_CAPITAL_REFUND, GameStatus
 from app.formatters import agent_verb, br_num
 from app.engine.apply import (
     apply_delta,
@@ -19,8 +19,9 @@ from app.engine.apply import (
     schedule,
     sync_derived,
 )
-from app.engine.congress import roll_vote
+from app.engine.congress import roll_vote, stamp_amendment
 from app.engine.costs import compute_cost, spend, verdict
+from app.engine.mandate import assess_mandate, unconstitutional_reason
 from app.engine.loss import evaluate_loss
 from app.models import (
     ActionProposal,
@@ -93,51 +94,117 @@ def _anticipation(state: GameState, proposal: ActionProposal, rng: Random) -> No
     )
 
 
+def _blocked(
+    proposal: ActionProposal,
+    reason: str,
+    cost_political: float = 0.0,
+    cost_fiscal: float = 0.0,
+    mandate_note: str = "",
+    mandate_applied: bool = False,
+    limit_kind: str = "budget",
+) -> ResolvedAction:
+    extra = f" {mandate_note}" if mandate_note else ""
+    return ResolvedAction(
+        title=proposal.title,
+        summary=proposal.summary,
+        passed=False,
+        reason=reason + extra,
+        category=proposal.category,
+        execution="blocked",
+        scale=0.0,
+        fiscal_cost_brl_bi=cost_fiscal,
+        political_cost=cost_political,
+        countries=proposal.affected_countries,
+        mandate_applied=mandate_applied,
+        mandate_note=mandate_note,
+        limit_kind=limit_kind,
+    )
+
+
 def _apply_proposal(
     state: GameState, proposal: ActionProposal, raw_text: str, rng: Random
 ) -> ResolvedAction:
     p = params(state.difficulty)
-    cost = compute_cost(state, proposal, raw_text)
+    mandate = assess_mandate(state, raw_text, proposal)
+    illegal = unconstitutional_reason(raw_text)
+    if illegal:
+        note = (
+            " O bônus do mandato das urnas não se aplica a medidas inconstitucionais."
+            if mandate.matched
+            else ""
+        )
+        push_history(state, "resource", "Ação bloqueada", illegal, ["BRA"])
+        return _blocked(proposal, illegal + note, mandate_note=mandate.note, limit_kind="constitution")
+    if mandate.contradicts:
+        push_history(state, "resource", "Ação bloqueada pelo mandato", mandate.contradict_reason, ["BRA"])
+        return _blocked(
+            proposal,
+            mandate.contradict_reason,
+            mandate_note=mandate.note,
+            limit_kind="campaign",
+        )
+    cost = compute_cost(state, proposal, raw_text, mandate)
     resource = verdict(state, cost)
     if resource.mode == "blocked":
-        push_history(state, "resource", "Ação bloqueada por falta de recursos", resource.message, ["BRA"])
-        return ResolvedAction(
-            title=proposal.title,
-            summary=proposal.summary,
-            passed=False,
-            reason=resource.message,
-            category=proposal.category,
-            execution="blocked",
-            scale=0.0,
-            fiscal_cost_brl_bi=cost.fiscal_brl_bi,
-            political_cost=cost.political,
-            countries=proposal.affected_countries,
+        would = (
+            " Sem o limite orçamentário, o mandato das urnas teria barateado o capital político."
+            if mandate.applied
+            else ""
         )
+        reason = resource.message + would
+        if mandate.applied:
+            reason += " " + mandate.note
+        push_history(state, "resource", "Ação bloqueada por falta de recursos", reason, ["BRA"])
+        return _blocked(
+            proposal,
+            reason,
+            cost_political=cost.political,
+            cost_fiscal=cost.fiscal_brl_bi,
+            mandate_note=mandate.note,
+            mandate_applied=False,
+            limit_kind="budget",
+        )
+    stamp_amendment(proposal, raw_text)
     spend(state, resource)
-    passed, vote_reason, _chance = roll_vote(state, proposal, rng)
-    if resource.mode == "partial":
-        vote_reason = resource.message + " " + vote_reason
+    passed, vote_reason, _chance = roll_vote(state, proposal, rng, mandate)
+    if mandate.applied:
+        vote_reason = vote_reason + " " + mandate.note
     if not passed:
         state.budget.fiscal_space_brl_bi = min(
             state.budget.fiscal_space_annual_cap_brl_bi,
             state.budget.fiscal_space_brl_bi + resource.fiscal_spent,
         )
         state.budget.year_spent_brl_bi = max(0.0, state.budget.year_spent_brl_bi - resource.fiscal_spent)
+        refund = round(resource.political_spent * REJECTION_CAPITAL_REFUND, 2)
+        if refund > 0:
+            capital = state.indicators.get("political_capital", 0.0) + refund
+            state.indicators["political_capital"] = max(0.0, min(100.0, capital))
         apply_delta(state, "political_capital", -2.5, 1.0)
         apply_delta(state, "coalition_support", -1.8, p["consequence_intensity"])
         apply_delta(state, "media_climate", -2.0, 1.0)
-        push_history(state, "action_result", f"Derrota: {proposal.title}", vote_reason, ["BRA"])
+        apply_delta(state, "approval", -1.5, p["consequence_intensity"])
+        refund_note = (
+            f" O Congresso rejeitou a medida; o espaço fiscal não foi empenhado. "
+            f"Foram devolvidos {br_num(refund, 1)} de capital político "
+            f"({br_num(REJECTION_CAPITAL_REFUND * 100, 0)}% do custo cobrado)."
+        )
+        reason = vote_reason + refund_note
+        push_history(state, "action_result", f"Derrota: {proposal.title}", reason, ["BRA"])
         return ResolvedAction(
             title=proposal.title,
             summary=proposal.summary,
             passed=False,
-            reason=vote_reason + " O espaço fiscal não foi empenhado.",
+            reason=reason,
             category=proposal.category,
             execution="rejected",
             scale=0.0,
             fiscal_cost_brl_bi=0.0,
-            political_cost=resource.political_spent,
+            political_cost=max(0.0, resource.political_spent - refund),
             countries=proposal.affected_countries,
+            mandate_applied=mandate.applied,
+            mandate_note=mandate.note,
+            capital_refunded=refund,
+            limit_kind="congress",
         )
     scale = resource.scale
     immediate: dict[str, float] = {}
@@ -191,6 +258,8 @@ def _apply_proposal(
         fiscal_cost_brl_bi=resource.fiscal_spent,
         political_cost=resource.political_spent,
         countries=proposal.affected_countries,
+        mandate_applied=mandate.applied,
+        mandate_note=mandate.note,
     )
 
 
@@ -317,7 +386,8 @@ def _fallback_report(state: GameState, resolved: list[ResolvedAction]) -> Report
             f"Selic em {br_num(state.indicators['selic'], 2)}%, inflação {br_num(state.indicators['inflation'], 2)}%, "
             f"PIB {br_num(state.indicators['gdp_growth'], 2, signed=True)}%, "
             f"dívida {br_num(state.indicators['public_debt_gdp'], 1)}% do PIB. "
-            f"Espaço fiscal: R$ {br_num(state.budget.fiscal_space_brl_bi, 1)} bi."
+            f"Espaço fiscal: R$ {br_num(state.budget.fiscal_space_brl_bi, 1)} bi "
+            f"(a arrecadação recompôs cerca de R$ {br_num(state.budget.monthly_replenish_brl_bi, 1)} bi neste mês)."
         ),
         politica=(
             f"Apoio da coalizão em {br_num(state.congress.coalition_support, 0)}%. "
@@ -328,7 +398,14 @@ def _fallback_report(state: GameState, resolved: list[ResolvedAction]) -> Report
             f"Índice de criminalidade em {br_num(state.indicators['crime_index'], 0)}. "
             f"Estabilidade institucional: {br_num(state.indicators['institutional_stability'], 0)}."
         ),
-        aprovacao=f"Aprovação presidencial em {br_num(state.indicators['approval'], 1)}%.",
+        aprovacao=(
+            f"Aprovação presidencial em {br_num(state.indicators['approval'], 1)}%."
+            + (
+                " Derrotas no Congresso desgastam a popularidade."
+                if rejected
+                else ""
+            )
+        ),
         relacoes_internacionais=(
             "Relações: "
             + ", ".join(

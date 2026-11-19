@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from app.constants import DIFFICULTY_PARAMS, FISCAL_COST_BRL_BI, POLITICAL_COST, SCOPE_ORDER
+from app.constants import (
+    CONGRESS_POLITICAL_ADD,
+    DIFFICULTY_PARAMS,
+    FISCAL_COST_BRL_BI,
+    ORDINARY_BILL_CAPITAL_MAX,
+    PEC_POLITICAL_SURCHARGE,
+    POLITICAL_COST,
+    SCOPE_ORDER,
+)
+from app.engine.mandate import MandateAssessment, mandate_cost_factor
 from app.formatters import br_num
 from app.models import ActionCost, ActionProposal, GameState, ResourceVerdict
 
@@ -23,7 +32,7 @@ def infer_scope(text: str, proposed: str) -> str:
         "estado de defesa",
         "estado de sítio",
     )
-    large = ("reforma", "pacote", "nacional", "congresso", "constitucional", "ambicioso")
+    large = ("reforma ampla", "pacote nacional", "em todo o país", "constitucional", "ambicioso")
     small = ("sinalizar", "discurso", "anunciar estudo", "um pouco", "modesto", "piloto")
     if any(token in lowered for token in massive):
         return "massive"
@@ -36,14 +45,25 @@ def infer_scope(text: str, proposed: str) -> str:
     return proposed if proposed in SCOPE_ORDER else "medium"
 
 
-def compute_cost(state: GameState, proposal: ActionProposal, raw_text: str = "") -> ActionCost:
+def compute_cost(
+    state: GameState,
+    proposal: ActionProposal,
+    raw_text: str = "",
+    mandate: MandateAssessment | None = None,
+) -> ActionCost:
     scope = infer_scope(raw_text, proposal.scope)
     idx = _index(scope)
     fiscal = FISCAL_COST_BRL_BI.get(proposal.category, FISCAL_COST_BRL_BI["other"])[idx]
     political = POLITICAL_COST.get(proposal.category, POLITICAL_COST["other"])[idx]
+    from app.engine.congress import is_constitutional_amendment
+
+    pec = is_constitutional_amendment(proposal, raw_text)
     if proposal.requires_congress:
-        political += 4.0 + proposal.congress_difficulty * 0.04
-        fiscal += 0.8
+        political += CONGRESS_POLITICAL_ADD
+        fiscal += 0.6
+    if pec:
+        political += PEC_POLITICAL_SURCHARGE
+        fiscal += 1.2
     multiplier = DIFFICULTY_PARAMS[state.difficulty]["cost_multiplier"]
     fiscal *= multiplier
     political *= multiplier
@@ -51,6 +71,10 @@ def compute_cost(state: GameState, proposal: ActionProposal, raw_text: str = "")
         political *= 1.12
     if state.congress.coalition_support < 40:
         political *= 1.1
+    if mandate is not None:
+        political *= mandate_cost_factor(mandate)
+    if proposal.requires_congress and not pec:
+        political = min(political, ORDINARY_BILL_CAPITAL_MAX)
     return ActionCost(
         fiscal_brl_bi=round(fiscal, 2),
         political=round(political, 2),
@@ -119,3 +143,50 @@ def spend(state: GameState, resource: ResourceVerdict) -> None:
     state.budget.year_spent_brl_bi += resource.fiscal_spent
     capital = state.indicators.get("political_capital", 0.0) - resource.political_spent
     state.indicators["political_capital"] = max(0.0, min(100.0, capital))
+
+
+def heuristic_proposal(text: str) -> ActionProposal:
+    from app.engine.congress import is_constitutional_amendment
+
+    lowered = (text or "").lower()
+    pec = is_constitutional_amendment(None, text)
+    if pec:
+        return ActionProposal(
+            title="PEC",
+            summary=text[:240],
+            category="institutional",
+            scope="large",
+            requires_congress=True,
+            congress_difficulty=72,
+            constitutional_amendment=True,
+        )
+    category = "other"
+    scope = "medium"
+    difficulty = 42
+    requires = True
+    if any(token in lowered for token in ("isenção", "isencao", "ir até", "ir ate", "cinco mil")):
+        category = "fiscal"
+        scope = "medium"
+        difficulty = 40
+    elif any(token in lowered for token in ("tribut", "imposto", "reforma")):
+        category = "fiscal"
+        scope = "medium" if "ampla" not in lowered else "large"
+        difficulty = 44
+    elif any(token in lowered for token in ("saúde", "saude", "educação", "educacao", "creche", "bolsa")):
+        category = "social"
+    elif any(token in lowered for token in ("obra", "ferrovia", "saneamento", "infra")):
+        category = "infra"
+    elif any(token in lowered for token in ("discurso", "sinalizar", "decreto")):
+        requires = "lei" in lowered or "projeto" in lowered
+        scope = "small"
+        difficulty = 18
+        category = "political"
+    return ActionProposal(
+        title="Ação",
+        summary=text[:240],
+        category=category,  # type: ignore[arg-type]
+        scope=scope,  # type: ignore[arg-type]
+        requires_congress=requires,
+        congress_difficulty=difficulty,
+        constitutional_amendment=False,
+    )

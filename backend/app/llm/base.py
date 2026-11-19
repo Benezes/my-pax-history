@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from app.constants import ProviderId
-from app.models import AdvisorReply, GameState, TurnLlmBundle
+from app.models import AdvisorReply, CampaignClassification, GameState, TurnLlmBundle
 
 
 class ProviderError(RuntimeError):
@@ -27,6 +27,9 @@ class LlmProvider(ABC):
 
     @abstractmethod
     async def estimate_action(self, state: GameState, text: str) -> TurnLlmBundle:
+        raise NotImplementedError
+
+    async def classify_campaign(self, texts: list[str]) -> CampaignClassification:
         raise NotImplementedError
 
     async def health(self) -> dict[str, Any]:

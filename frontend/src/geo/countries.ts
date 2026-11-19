@@ -55,9 +55,26 @@ export function isoHighlighted(iso: string, highlighted: Set<string>) {
   return highlighted.has("EU") && EU_ISO.has(iso);
 }
 
+const PT_BR_NAMES: Record<string, string> = {
+  Arménia: "Armênia",
+  Eslovénia: "Eslovênia",
+  Estónia: "Estônia",
+  Letónia: "Letônia",
+  "Macedónia do Norte": "Macedônia do Norte",
+  Madagáscar: "Madagascar",
+  "Nova Caledónia": "Nova Caledônia",
+  Polónia: "Polônia",
+  Quénia: "Quênia",
+  Roménia: "Romênia",
+};
+
+export function brazilianName(name: string) {
+  return PT_BR_NAMES[name] || name;
+}
+
 export function featureLabel(feature: CountryFeature, countries: MapCountry[]) {
   const match = countries.find((item) => item.iso === feature.properties.iso);
-  return match?.name || feature.properties.name;
+  return brazilianName(match?.name || feature.properties.name);
 }
 
 export function capColor(iso: string, highlighted: Set<string>) {

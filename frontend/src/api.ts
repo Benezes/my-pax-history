@@ -1,4 +1,4 @@
-import type { Game, MetaResponse, SaveRow, WhatIfResult } from "./types";
+import type { CostPreview, Game, MetaResponse, SaveRow, WhatIfResult } from "./types";
 
 export const FETCH_TIMEOUT_MS = 210_000;
 
@@ -78,6 +78,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   meta: () => request<MetaResponse>("/api/meta"),
+  runCampaign: (id: string, proposals: string[]) =>
+    request<Game>(`/api/games/${id}/campaign`, { method: "POST", body: JSON.stringify({ proposals }) }),
   createGame: (body: {
     difficulty: string;
     provider: string;
@@ -94,6 +96,8 @@ export const api = {
     request<Game>(`/api/games/${id}/advance`, { method: "POST", body: JSON.stringify({ months }) }),
   whatIf: (id: string, text: string) =>
     request<WhatIfResult>(`/api/games/${id}/what-if`, { method: "POST", body: JSON.stringify({ text }) }),
+  costPreview: (id: string, text: string) =>
+    request<CostPreview>(`/api/games/${id}/cost-preview`, { method: "POST", body: JSON.stringify({ text }) }),
   advisor: (id: string, message: string) =>
     request<Game>(`/api/games/${id}/advisor`, { method: "POST", body: JSON.stringify({ message }) }),
   save: (id: string, name: string) =>

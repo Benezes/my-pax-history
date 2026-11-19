@@ -20,7 +20,8 @@ Responda SOMENTE um JSON válido, sem markdown, com este formato:
         "affected_countries": ["BRA"],
         "tags": ["exemplo"],
         "risks": ["risco em português"],
-        "timing_note": "quando os efeitos aparecem"
+        "timing_note": "quando os efeitos aparecem",
+        "constitutional_amendment": false
       }
     ],
     "advisor_warning": "string ou null"
@@ -66,6 +67,9 @@ agent_id permitido: congresso, partidos, governadores, stf, empresariado, sindic
 forcas_armadas, imprensa, sociedade_civil.
 NUNCA envie valores absolutos de indicadores. Apenas deltas modestos.
 O motor calcula custos fiscais e de capital político; você só estima o escopo.
+Se houver mandato das urnas, preencha mandate_hint_index (0-based) e mandate_hint_score (0 a 1)
+quando a ação entregar uma proposta de campanha. contradicts_campaign=true se a ação desmente a campanha.
+constitutional_amendment=true se for PEC, emenda constitucional ou mudança da Constituição (quórum de 3/5).
 """.strip()
 
 
@@ -94,6 +98,10 @@ def _compact_state(state: GameState) -> str:
         lines.append("Eventos recentes:")
         for entry in recent:
             lines.append(f"- {entry.date_label} [{entry.kind}] {entry.title}: {entry.body[:180]}")
+    if state.campaign and state.campaign.proposals:
+        lines.append("Mandato das urnas (propostas de campanha e peso):")
+        for item in state.campaign.proposals:
+            lines.append(f"- {item.text[:160]} (peso {item.weight:.2f}, categoria {item.category})")
     lines.append("Resumo de memória: " + state.memory_summary[-1200:])
     return "\n".join(lines)
 
@@ -168,4 +176,30 @@ Pergunta do presidente:
 
 Responda SOMENTE JSON:
 {{"reply": "texto", "disagrees": false, "risk_level": "baixo|moderado|alto|crítico"}}
+"""
+
+
+def campaign_prompt(texts: list[str]) -> str:
+    listed = "\n".join(f"{index + 1}. {text}" for index, text in enumerate(texts))
+    return f"""Você classifica propostas de campanha presidencial no Brasil (eleição de 2026).
+Todo texto visível ao jogador em português brasileiro.
+NÃO calcule votos, cadeiras nem margem — só classifique cada proposta.
+Propostas:
+{listed}
+
+Responda SOMENTE JSON:
+{{
+  "proposals": [
+    {{
+      "category": "fiscal|monetary|social|security|infra|diplomacy|political|institutional|other",
+      "popularity": 0.7,
+      "alignment": 0.6,
+      "keywords": ["palavra"],
+      "summary": "frase curta em português"
+    }}
+  ],
+  "platform_coherence": 0.6,
+  "narrative": "um parágrafo em português sobre a campanha, sem números de urna"
+}}
+popularity e alignment de 0 a 1. Devolva um item por proposta, na mesma ordem.
 """

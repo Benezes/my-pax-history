@@ -53,16 +53,17 @@ def create_new_game(
         brazil_lore=brazil["lore"],
         world_lore=world["lore"],
         memory_summary=(
-            "Janeiro de 2027: posse presidencial. Coalizão estreita, Selic restritiva, "
-            "dívida elevada e polarização. Equilíbrio pragmático entre EUA e China."
+            "Campanha de 2026: as propostas ainda serão levadas às urnas. "
+            "A posse em janeiro de 2027 depende do mandato que o eleitorado entregar."
         ),
+        campaign_pending=True,
     )
     push_history(
         state,
         "system",
-        "Posse presidencial",
-        "Você assume a Presidência da República em janeiro de 2027. O Congresso está fragmentado, "
-        "o espaço fiscal é estreito e o capital político da lua de mel é limitado.",
+        "Campanha de 2026",
+        "Antes da posse, apresente 3 a 5 propostas centrais. O eleitorado e o Congresso "
+        "sairão das urnas; o motor calcula os números, a IA só classifica a plataforma.",
         ["BRA"],
     )
     return state

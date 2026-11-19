@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from app.engine.election import inaugurate, simulate_election, validate_proposals
 from app.engine.newgame import create_new_game
 from app.engine.turn import advance_months, queue_action
 from app.engine.whatif import build_what_if
@@ -13,7 +14,9 @@ from app.models import (
     ActionProposal,
     AdvisorRequest,
     AdvanceRequest,
+    CampaignRequest,
     ChatMessage,
+    CostPreviewRequest,
     NewGameRequest,
     QueueActionRequest,
     SaveRequest,
@@ -104,6 +107,55 @@ async def games():
 @router.get("/games/{game_id}")
 async def get_game(game_id: str):
     return public_state(_get(game_id))
+
+
+@router.post("/games/{game_id}/campaign")
+async def run_campaign(game_id: str, body: CampaignRequest):
+    state = _get(game_id)
+    if state.status != "playing":
+        raise HTTPException(status_code=400, detail="A partida já terminou.")
+    if state.campaign is not None:
+        raise HTTPException(status_code=400, detail="Esta partida já tem um mandato das urnas.")
+    try:
+        texts = validate_proposals(body.proposals)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    provider = _provider(state)
+    try:
+        classification = await provider.classify_campaign(texts)
+        _stamp_model(state, provider)
+    except ProviderError:
+        mock = MockProvider()
+        classification = await mock.classify_campaign(texts)
+        _stamp_model(state, mock)
+    except Exception:
+        mock = MockProvider()
+        classification = await mock.classify_campaign(texts)
+        _stamp_model(state, mock)
+    result = simulate_election(texts, classification, state.seed, state.difficulty)
+    inaugurate(state, result)
+    save_game(state)
+    return public_state(state)
+
+
+@router.post("/games/{game_id}/cost-preview")
+async def cost_preview(game_id: str, body: CostPreviewRequest):
+    state = _get(game_id)
+    from app.engine.costs import compute_cost, heuristic_proposal
+    from app.engine.congress import stamp_amendment
+    from app.engine.mandate import assess_mandate
+
+    proposal = heuristic_proposal(body.text)
+    stamp_amendment(proposal, body.text)
+    mandate = assess_mandate(state, body.text, proposal)
+    cost = compute_cost(state, proposal, body.text, mandate)
+    return {
+        "political_cost": cost.political,
+        "fiscal_cost_brl_bi": cost.fiscal_brl_bi,
+        "mandate_applied": mandate.applied,
+        "constitutional_amendment": proposal.constitutional_amendment,
+        "note": "Estimativa aproximada do motor, sem a IA.",
+    }
 
 
 @router.post("/games/{game_id}/actions")
