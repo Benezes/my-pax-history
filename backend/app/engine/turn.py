@@ -360,7 +360,36 @@ def _world_drift(state: GameState, rng: Random) -> None:
         state.diplomacy[power.iso] = power.relation_brazil
 
 
-def _fallback_report(state: GameState, resolved: list[ResolvedAction]) -> ReportSection:
+def _approval_narrative(
+    state: GameState,
+    resolved: list[ResolvedAction],
+    approval_before: float | None = None,
+    delayed_approval: bool = False,
+) -> str:
+    now = float(state.indicators["approval"])
+    rejected = [item for item in resolved if item.execution == "rejected"]
+    text = f"Aprovação presidencial em {br_num(now, 1)}%."
+    if approval_before is None:
+        return text + (" Derrotas no Congresso desgastam a popularidade." if rejected else "")
+    delta = now - approval_before
+    if abs(delta) >= 0.05:
+        verb = "subiu" if delta > 0 else "recuou"
+        text += f" A popularidade {verb} {br_num(abs(delta), 1)} p.p."
+    if delayed_approval and delta > 0.05:
+        text += " O avanço inclui efeito defasado de medidas anteriores."
+    elif rejected and delta < -0.05:
+        text += " Derrotas no Congresso desgastam a popularidade."
+    elif rejected and delta > 0.05:
+        text += " Apesar das derrotas no Congresso, a popularidade avançou."
+    return text
+
+
+def _fallback_report(
+    state: GameState,
+    resolved: list[ResolvedAction],
+    approval_before: float | None = None,
+    delayed_approval: bool = False,
+) -> ReportSection:
     blocked = [item for item in resolved if item.execution == "blocked"]
     rejected = [item for item in resolved if item.execution == "rejected"]
     partial = [item for item in resolved if item.passed and item.execution == "partial"]
@@ -398,14 +427,7 @@ def _fallback_report(state: GameState, resolved: list[ResolvedAction]) -> Report
             f"Índice de criminalidade em {br_num(state.indicators['crime_index'], 0)}. "
             f"Estabilidade institucional: {br_num(state.indicators['institutional_stability'], 0)}."
         ),
-        aprovacao=(
-            f"Aprovação presidencial em {br_num(state.indicators['approval'], 1)}%."
-            + (
-                " Derrotas no Congresso desgastam a popularidade."
-                if rejected
-                else ""
-            )
-        ),
+        aprovacao=_approval_narrative(state, resolved, approval_before, delayed_approval),
         relacoes_internacionais=(
             "Relações: "
             + ", ".join(
@@ -434,6 +456,12 @@ def process_month(state: GameState, bundle: TurnLlmBundle, rng: Random) -> None:
                 scope="medium",
             )
         ]
+    approval_before = float(state.indicators.get("approval", 0.0))
+    month_index = state.date.month_index()
+    delayed_approval = any(
+        effect.fire_month_index <= month_index and abs(effect.deltas.get("approval", 0.0)) > 0.01
+        for effect in state.scheduled_effects
+    )
     resolved: list[ResolvedAction] = []
     for index, proposal in enumerate(proposals):
         raw = texts[index] if index < len(texts) else combined
@@ -448,7 +476,7 @@ def process_month(state: GameState, bundle: TurnLlmBundle, rng: Random) -> None:
     regenerate_resources(state)
     sync_derived(state)
     evaluate_loss(state)
-    facts = _fallback_report(state, resolved)
+    facts = _fallback_report(state, resolved, approval_before, delayed_approval)
     llm_report = bundle.report
     report = ReportSection(
         economia=facts.economia,

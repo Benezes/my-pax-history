@@ -141,11 +141,12 @@ async def run_campaign(game_id: str, body: CampaignRequest):
 @router.post("/games/{game_id}/cost-preview")
 async def cost_preview(game_id: str, body: CostPreviewRequest):
     state = _get(game_id)
-    from app.engine.costs import compute_cost, heuristic_proposal
+    from app.engine.costs import compute_cost
     from app.engine.congress import stamp_amendment
     from app.engine.mandate import assess_mandate
+    from app.llm.mock import match_proposal
 
-    proposal = heuristic_proposal(body.text)
+    proposal = match_proposal(state, body.text)
     stamp_amendment(proposal, body.text)
     mandate = assess_mandate(state, body.text, proposal)
     cost = compute_cost(state, proposal, body.text, mandate)
@@ -154,7 +155,7 @@ async def cost_preview(game_id: str, body: CostPreviewRequest):
         "fiscal_cost_brl_bi": cost.fiscal_brl_bi,
         "mandate_applied": mandate.applied,
         "constitutional_amendment": proposal.constitutional_amendment,
-        "note": "Estimativa aproximada do motor, sem a IA.",
+        "note": "Estimativa aproximada do motor, antes da classificação da IA.",
     }
 
 

@@ -13,15 +13,16 @@ from app.constants import (
     PEC_THRESHOLD,
     REJECTION_CAPITAL_REFUND,
 )
-from app.engine.apply import apply_delta
+from app.engine.apply import apply_delta, sync_derived
 from app.engine.congress import pass_chance, projected_votes, roll_vote, vote_threshold
-from app.engine.costs import compute_cost
+from app.engine.costs import compute_cost, heuristic_proposal
 from app.engine.election import compose_congress, inaugurate, simulate_election, validate_proposals
 from app.engine.mandate import assess_mandate, year_decay
 from app.engine.newgame import create_new_game
-from app.engine.turn import _apply_proposal
-from app.llm.mock import MockProvider
-from app.models import ActionProposal, CampaignClassification, CampaignProposalHint, GameState
+from app.engine.turn import _apply_proposal, _fallback_report
+from app.formatters import br_num
+from app.llm.mock import MockProvider, match_proposal
+from app.models import ActionProposal, CampaignClassification, CampaignProposalHint, GameState, ResolvedAction
 
 
 def _hints(n: int, popularity: float, alignment: float) -> CampaignClassification:
@@ -305,6 +306,7 @@ class ElectionEngineTests(unittest.IsolatedAsyncioTestCase):
         result = simulate_election(PROPOSALS, _hints(3, 0.88, 0.88), seed=5, difficulty="medio")
         inaugurate(state, result)
         before = state.congress.chamber.government + state.congress.chamber.allied
+        senate_before = state.congress.senate.government + state.congress.senate.allied
         proposal = ActionProposal(
             title="Projeto ordinário",
             summary="Lei comum",
@@ -315,7 +317,9 @@ class ElectionEngineTests(unittest.IsolatedAsyncioTestCase):
         chamber_high, _ = projected_votes(state, proposal)
         apply_delta(state, "coalition_support", -12.0, 1.0)
         after = state.congress.chamber.government + state.congress.chamber.allied
+        senate_after = state.congress.senate.government + state.congress.senate.allied
         self.assertLess(after, before)
+        self.assertLess(senate_after, senate_before)
         self.assertAlmostEqual(
             after / state.congress.chamber.seats,
             state.congress.coalition_support / 100.0,
@@ -323,6 +327,22 @@ class ElectionEngineTests(unittest.IsolatedAsyncioTestCase):
         )
         chamber_low, _ = projected_votes(state, proposal)
         self.assertLess(chamber_low, chamber_high)
+
+    def test_sync_derived_does_not_snap_senate_to_chamber(self):
+        state = create_new_game("medio", "mock")
+        result = simulate_election(PROPOSALS, _hints(3, 0.88, 0.88), seed=5, difficulty="medio")
+        inaugurate(state, result)
+        chamber_before = state.congress.chamber.government + state.congress.chamber.allied
+        senate_before = state.congress.senate.government + state.congress.senate.allied
+        sync_derived(state)
+        self.assertEqual(
+            chamber_before,
+            state.congress.chamber.government + state.congress.chamber.allied,
+        )
+        self.assertEqual(
+            senate_before,
+            state.congress.senate.government + state.congress.senate.allied,
+        )
 
     def test_ordinary_capital_is_modest_and_pec_costs_more(self):
         state = create_new_game("medio", "mock")
@@ -375,6 +395,67 @@ class ElectionEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(classified.proposals), 3)
         self.assertTrue(classified.narrative)
         self.assertGreater(classified.proposals[0].popularity, 0.5)
+
+    def test_br_num_rounds_half_up_like_the_header(self):
+        self.assertEqual(br_num(34.5, 0), "35")
+        self.assertEqual(br_num(34.4, 0), "34")
+        self.assertEqual(round(34.5), 34)
+
+    def test_report_mentions_delayed_approval_when_popularity_rises(self):
+        state = create_new_game("medio", "mock")
+        state.indicators["approval"] = 52.4
+        resolved = [
+            ResolvedAction(
+                title="PEC duradoura",
+                summary="Texto",
+                passed=False,
+                reason="Rejeitada no Congresso.",
+                category="institutional",
+                execution="rejected",
+            )
+        ]
+        report = _fallback_report(state, resolved, approval_before=50.0, delayed_approval=True)
+        self.assertIn("subiu", report.aprovacao)
+        self.assertIn("defasad", report.aprovacao.lower())
+        self.assertNotIn("desgastam a popularidade", report.aprovacao)
+
+    def test_report_blames_congress_only_when_approval_falls(self):
+        state = create_new_game("medio", "mock")
+        state.indicators["approval"] = 48.2
+        resolved = [
+            ResolvedAction(
+                title="PEC duradoura",
+                summary="Texto",
+                passed=False,
+                reason="Rejeitada no Congresso.",
+                category="institutional",
+                execution="rejected",
+            )
+        ]
+        report = _fallback_report(state, resolved, approval_before=50.0, delayed_approval=False)
+        self.assertIn("recuou", report.aprovacao)
+        self.assertIn("desgastam a popularidade", report.aprovacao)
+
+    async def test_cost_preview_matches_offline_classifier(self):
+        state = create_new_game("medio", "mock")
+        result = simulate_election(PROPOSALS, _hints(3, 0.88, 0.88), seed=5, difficulty="medio")
+        inaugurate(state, result)
+        text = "Pacote de ferrovias e saneamento no Nordeste com obras transparentes."
+        from app.engine.congress import stamp_amendment
+
+        preview = match_proposal(state, text)
+        stamp_amendment(preview, text)
+        preview_mandate = assess_mandate(state, text, preview)
+        preview_cost = compute_cost(state, preview, text, preview_mandate)
+        bundle = await MockProvider().estimate_action(state, text)
+        classified = bundle.interpretation.actions[0]
+        stamp_amendment(classified, text)
+        classified_mandate = assess_mandate(state, text, classified)
+        classified_cost = compute_cost(state, classified, text, classified_mandate)
+        self.assertEqual(preview.scope, classified.scope)
+        self.assertEqual(preview_cost.political, classified_cost.political)
+        heuristic = heuristic_proposal(text)
+        self.assertNotEqual(preview.scope, heuristic.scope)
 
 
 if __name__ == "__main__":

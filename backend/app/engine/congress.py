@@ -4,6 +4,10 @@ import math
 from random import Random
 
 from app.constants import (
+    COALITION_CHAMBER_MAX,
+    COALITION_CHAMBER_MIN,
+    COALITION_SENATE_MAX,
+    COALITION_SENATE_MIN,
     DIFFICULTY_PARAMS,
     HOUSE_PASS_STEEPNESS,
     INDEPENDENT_SWING,
@@ -172,12 +176,36 @@ def roll_vote(
     return passed, reason, chance
 
 
-def sync_congress_to_support(state: GameState) -> None:
+def _coalition_seat_share(chamber: Chamber) -> float:
+    return (chamber.government + chamber.allied) / max(1, chamber.seats)
+
+
+def nudge_houses_by_support_delta(state: GameState, previous_support: float) -> None:
+    """Move each house by the coalition-support change, keeping their own bases."""
     from app.engine.election import _shift_chamber, _sync_parties
 
-    share = state.congress.coalition_support / 100.0
-    chamber = _shift_chamber(state.congress.chamber, share, 0.0, 0.32, 0.64)
-    senate = _shift_chamber(state.congress.senate, share, 0.0, 0.30, 0.62)
+    delta_share = (state.congress.coalition_support - previous_support) / 100.0
+    if abs(delta_share) < 1e-12:
+        return
+    chamber = _shift_chamber(
+        state.congress.chamber,
+        _coalition_seat_share(state.congress.chamber) + delta_share,
+        0.0,
+        COALITION_CHAMBER_MIN,
+        COALITION_CHAMBER_MAX,
+    )
+    senate = _shift_chamber(
+        state.congress.senate,
+        _coalition_seat_share(state.congress.senate) + delta_share,
+        0.0,
+        COALITION_SENATE_MIN,
+        COALITION_SENATE_MAX,
+    )
     state.congress.chamber = chamber
     state.congress.senate = senate
     state.congress.parties = _sync_parties(state.congress.parties, chamber, senate)
+
+
+def sync_congress_to_support(state: GameState) -> None:
+    """Compatibility wrapper: do not snap both houses to the same share."""
+    nudge_houses_by_support_delta(state, state.congress.coalition_support)

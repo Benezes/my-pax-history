@@ -848,7 +848,8 @@ function GameScreen({
             />
             {costPreview && !tooShort && (
               <p className="cost-preview">
-                Estimativa: cerca de <b>{NUM(costPreview.political_cost, 0)} de capital político</b>
+                Estimativa aproximada (antes da classificação): cerca de{" "}
+                <b>{NUM(costPreview.political_cost, 0)} de capital político</b>
                 {costPreview.mandate_applied ? " · mandato das urnas" : ""}
                 {costPreview.constitutional_amendment ? " · PEC (3/5)" : ""}
               </p>
@@ -1061,7 +1062,9 @@ function WhatIfPanel({
         {MONEY(result.fiscal_available)} bi / {NUM(result.political_available, 0)} cap.
       </p>
       {result.mandate_note ? <p>{result.mandate_note}</p> : null}
-      <p>{result.resource_message}</p>
+      {result.execution !== "full" && result.resource_message ? (
+        <p>{result.resource_message}</p>
+      ) : null}
       {result.requires_congress && (
         <p>Requer Congresso. Chance projetada de aprovação: {PCT(result.pass_chance * 100, 0)}.</p>
       )}

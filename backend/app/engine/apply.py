@@ -36,11 +36,12 @@ def cap_delta(indicator: str, delta: float, intensity: float) -> float:
 def set_value(state: GameState, key: str, value: float) -> None:
     if key == "coalition_support":
         bounds = INDICATOR_BOUNDS["coalition_support"]
+        previous = state.congress.coalition_support
         state.congress.coalition_support = clamp(value, *bounds)
         state.indicators["coalition_support"] = state.congress.coalition_support
-        from app.engine.congress import sync_congress_to_support
+        from app.engine.congress import nudge_houses_by_support_delta
 
-        sync_congress_to_support(state)
+        nudge_houses_by_support_delta(state, previous)
         return
     if key in state.branches:
         bounds = INDICATOR_BOUNDS.get(key, (0.0, 100.0))
@@ -115,10 +116,7 @@ def format_delta(key: str, delta: float) -> str:
 
 
 def sync_derived(state: GameState) -> None:
-    from app.engine.congress import sync_congress_to_support
-
     state.indicators["coalition_support"] = state.congress.coalition_support
-    sync_congress_to_support(state)
     approval = state.indicators["approval"]
     for region in REGIONS:
         current = state.approval_breakdown.regions.get(region, approval)
